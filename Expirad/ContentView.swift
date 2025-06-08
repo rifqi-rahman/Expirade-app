@@ -36,16 +36,16 @@ struct ContentView: View {
                                 .background(cameraManager.isFlashlightOn ? Color.yellow : Color.black)
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
                         }
-                        .accessibilityLabel(cameraManager.isFlashlightOn ? "Flashlight is on" : "Flashlight is off")
-                        .accessibilityHint("Double tap to toggle flashlight")
+                        .accessibilityLabel(cameraManager.isFlashlightOn ? "Senter menyala" : "Senter mati")
+                        .accessibilityHint("Ketuk dua kali untuk menghidupkan atau mematikan senter")
                         
                         Spacer()
                         
                         // Help button
                         Button(action: {
-                            // Help action - speak guidance
+                            // Quick help action - speak basic guidance
                             cameraManager.stopSpeaking()
-                            let helpMessage = "Point camera at medicine package expiration date"
+                            let helpMessage = "Arahkan kamera ke tanggal kadaluarsa pada kemasan obat. Tahan stabil sekitar 15 sentimeter. Pastikan pencahayaan cukup."
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                                 cameraManager.speakGuidance(helpMessage, priority: true)
                             }
@@ -57,8 +57,12 @@ struct ContentView: View {
                                 .background(Color.black)
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
                         }
-                        .accessibilityLabel("Help button")
-                        .accessibilityHint("Double tap to hear instructions for scanning")
+                        .accessibilityLabel("Tombol bantuan")
+                        .accessibilityHint("Ketuk dua kali untuk mendengar instruksi pemindaian")
+                        .onLongPressGesture {
+                            // Detailed help on long press
+                            cameraManager.speakDetailedHelp()
+                        }
                     }
                     .padding(.horizontal, 32)
                 }
@@ -75,10 +79,10 @@ struct ContentView: View {
                                 .id(cameraManager.previewRefreshID) // Force refresh when ID changes
                                 .onTapGesture {
                                     // Help camera focus when user taps screen
-                                    cameraManager.speakGuidance("Focusing camera", priority: false)
+                                    cameraManager.speakGuidance("Memfokuskan kamera", priority: false)
                                 }
-                                .accessibilityLabel("Camera viewfinder")
-                                .accessibilityHint("Double tap to help camera focus on expiration date")
+                                .accessibilityLabel("Jendela bidik kamera")
+                                .accessibilityHint("Ketuk dua kali untuk membantu kamera fokus pada tanggal kadaluarsa")
                             
                             // Overlay UI elements
                             VStack {
@@ -157,13 +161,13 @@ struct ContentView: View {
                         Spacer().frame(height: 40)
                         
                         // Tap to focus hint (VoiceOver friendly)
-                        Text("Tap center of screen to help camera focus")
+                        Text("Ketuk tengah layar untuk membantu fokus kamera")
                             .foregroundColor(.white.opacity(0.8))
                             .font(.body)
                             .multilineTextAlignment(.center)
                             .shadow(color: .black, radius: 1)
-                            .accessibilityLabel("Tap center of screen to help camera focus on expiration date")
-                            .accessibilityHint("Double tap to activate camera focus")
+                            .accessibilityLabel("Ketuk tengah layar untuk membantu kamera fokus pada tanggal kadaluarsa")
+                            .accessibilityHint("Ketuk dua kali untuk mengaktifkan fokus kamera")
                         
                         Spacer().frame(height: 30)
                     }
@@ -175,8 +179,13 @@ struct ContentView: View {
                 ResultView(detectedDate: cameraManager.detectedDate)
             }
             .onChange(of: cameraManager.shouldNavigateToResult) { oldValue, newValue in
-                // When returning from ResultView (newValue becomes false)
-                if oldValue == true && newValue == false {
+                // When navigating TO ResultView (newValue becomes true)
+                if oldValue == false && newValue == true {
+                    // Stop Camera TTS immediately to prevent conflicts with ResultView TTS
+                    cameraManager.stopSpeaking()
+                }
+                // When returning FROM ResultView (newValue becomes false)  
+                else if oldValue == true && newValue == false {
                     // Reset camera for new scan
                     cameraManager.resetForNewScan()
                 }

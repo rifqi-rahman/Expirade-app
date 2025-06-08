@@ -11,6 +11,13 @@ import Vision
 import Foundation
 import CoreHaptics
 
+// MARK: - Timing Configuration
+private let CAMERA_TTS_CLEANUP_DELAY: Double = 0.8 // Time to allow Camera TTS to finish before stopping
+// Adjust this value to control delay after successful scan:
+// - 0.5 = Very fast (may cut off TTS)  
+// - 0.8 = Balanced (current)
+// - 1.5 = Safer but slower
+
 // MARK: - Unified Camera Manager with Enhanced OCR
 class UnifiedCameraManager: NSObject, ObservableObject {
     
@@ -35,6 +42,9 @@ class UnifiedCameraManager: NSObject, ObservableObject {
         lastDetectedDate = nil
         hasSpokenInitialInstructions = false // Allow TTS guidance again
         
+        // IMPORTANT: Stop any lingering TTS from previous session
+        stopSpeaking()
+        
         // Re-enable OCR processing and unlock detection
         isOCRProcessingEnabled = true
         isDetectionInProgress = false // Unlock for new detection session
@@ -50,7 +60,7 @@ class UnifiedCameraManager: NSObject, ObservableObject {
             self.isCameraActive = true
             self.positioningGuidance = "Ready! Point camera at medicine package"
             self.ocrStatus = "Looking for dates..."
-            self.accessibilityStatus = "Ready to scan new package"
+            self.accessibilityStatus = "Siap memindai kemasan baru"
             
             // Restart TTS guidance for new scan
             if self.isVoiceGuidanceEnabled {
@@ -112,19 +122,19 @@ class UnifiedCameraManager: NSObject, ObservableObject {
         if isPreview {
             statusMessage = "🔍 PREVIEW MODE"
             descriptionMessage = "Preview Display\nRun app for real camera"
-            accessibilityStatus = "Preview mode"
+            accessibilityStatus = "Mode pratinjau"
             isCameraActive = false
             
             // Provide TTS feedback even in preview
             if isVoiceGuidanceEnabled {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                    self.speakGuidance("Preview mode active. Build and run the app on a real device to use the camera and OCR features.", priority: true)
+                    self.speakGuidance("Mode pratinjau aktif. Bangun dan jalankan aplikasi di perangkat asli untuk menggunakan kamera dan fitur OCR.", priority: true)
                 }
             }
         } else {
             statusMessage = "📷 CAMERA READY"
             descriptionMessage = "OCR Processing Running\nPoint at expiration date"
-            accessibilityStatus = "Ready to scan"
+            accessibilityStatus = "Siap memindai"
             isCameraActive = true
         }
     }
@@ -179,7 +189,7 @@ class UnifiedCameraManager: NSObject, ObservableObject {
                 self.descriptionMessage = "Go to Settings > Expirad > Camera"
                 self.debugInfo = "Camera permission denied"
                 self.isCameraActive = false
-                self.speakGuidance("Camera permission denied. Please go to Settings, then Expirad, then Camera, and enable camera access.", priority: true)
+                self.speakGuidance("Izin kamera ditolak. Silakan buka Pengaturan, lalu Expirad, lalu Kamera, dan aktifkan akses kamera.", priority: true)
             }
         case .restricted:
             DispatchQueue.main.async {
@@ -328,7 +338,7 @@ class UnifiedCameraManager: NSObject, ObservableObject {
                     self.statusMessage = "❌ CAMERA FAILED"
                     self.descriptionMessage = "Camera failed to start"
                     self.debugInfo = "Session failed to start"
-                    self.speakGuidance("Camera failed to start. Please restart the app.", priority: true)
+                    self.speakGuidance("Kamera gagal dimulai. Silakan mulai ulang aplikasi.", priority: true)
                 }
             }
             
@@ -370,14 +380,14 @@ class UnifiedCameraManager: NSObject, ObservableObject {
                     self.isFlashlightOn = true
                 }
                 print("💡 Flashlight ON")
-                speakGuidance("Flashlight turned on")
+                speakGuidance("Senter dinyalakan")
             } else {
                 device.torchMode = .off
                 DispatchQueue.main.async {
                     self.isFlashlightOn = false
                 }
                 print("💡 Flashlight OFF")
-                speakGuidance("Flashlight turned off")
+                speakGuidance("Senter dimatikan")
             }
             
             device.unlockForConfiguration()
@@ -386,17 +396,25 @@ class UnifiedCameraManager: NSObject, ObservableObject {
         }
     }
     
-    // MARK: - Direct Voice Guidance for Blind Users
+    // MARK: - Comprehensive Indonesian Voice Guidance for Blind Users
     private func speakInitialInstructions() {
         guard isVoiceGuidanceEnabled else { return }
         
-        // Direct, functional guidance
+        // Comprehensive Indonesian guidance with timing
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            self.speakGuidance("Point camera at expiration date. Hold steady 6 inches away.", priority: true)
+            self.speakGuidance("Selamat datang di Expirade. Arahkan kamera ke tanggal kadaluarsa pada kemasan obat.", priority: true)
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
+            self.speakGuidance("Tahan kamera stabil sekitar 15 sentimeter dari kemasan. Pastikan pencahayaan cukup.", priority: true)
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 7.5) {
+            self.speakGuidance("Cari tulisan EXP, kadaluarsa, atau tanggal pada kemasan obat. Ketuk dua kali untuk fokus.", priority: true)
         }
         
         hasSpokenInitialInstructions = true
-        print("🔊 Direct TTS guidance started")
+        print("🔊 Comprehensive Indonesian TTS guidance started")
     }
     
     func speakGuidance(_ message: String, priority: Bool = false) {
@@ -413,7 +431,7 @@ class UnifiedCameraManager: NSObject, ObservableObject {
         }
         lastGuidanceTime = now
         
-        print("🔊 Speaking: \(message)")
+        print("🔊 Speaking (Indonesian): \(message)")
         
         // Stop any current speech before starting new one
         if speechSynthesizer.isSpeaking {
@@ -421,8 +439,8 @@ class UnifiedCameraManager: NSObject, ObservableObject {
         }
         
         let utterance = AVSpeechUtterance(string: message)
-        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
-        utterance.rate = 0.5  // Normal speed for better comprehension by blind users
+        utterance.voice = AVSpeechSynthesisVoice(language: "id-ID") ?? AVSpeechSynthesisVoice(language: "en-US")
+        utterance.rate = 0.5  // Slower for better Indonesian comprehension
         utterance.volume = 1.0  // Full volume for accessibility
         utterance.pitchMultiplier = 1.0
         
@@ -431,6 +449,38 @@ class UnifiedCameraManager: NSObject, ObservableObject {
     
     func stopSpeaking() {
         speechSynthesizer.stopSpeaking(at: .immediate)
+    }
+    
+    // MARK: - Additional Indonesian Help Functions
+    func speakDetailedHelp() {
+        guard isVoiceGuidanceEnabled else { return }
+        
+        // Completely stop any current speech and reset
+        stopSpeaking()
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            self.speakGuidance("Panduan lengkap Expirade:", priority: true)
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            self.speakGuidance("Pertama, pastikan kemasan obat dalam pencahayaan yang cukup.", priority: true)
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) {
+            self.speakGuidance("Kedua, cari tulisan EXP, kadaluarsa, atau tanggal pada kemasan.", priority: true)
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 9.0) {
+            self.speakGuidance("Ketiga, arahkan kamera tepat ke area tanggal tersebut.", priority: true)
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 12.0) {
+            self.speakGuidance("Tahan kamera stabil sekitar 15 sentimeter dari kemasan.", priority: true)
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15.0) {
+            self.speakGuidance("Aplikasi akan memberikan getaran dan suara ketika tanggal terdeteksi.", priority: true)
+        }
     }
     
     // MARK: - Comprehensive Real-World Expiration Date Parser
@@ -912,7 +962,7 @@ extension UnifiedCameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
             DispatchQueue.main.async {
                 self.ocrStatus = "Looking for text..."
                 self.positioningGuidance = "Move camera closer to text"
-                self.accessibilityStatus = "No text detected. Move closer."
+                self.accessibilityStatus = "Tidak ada teks terdeteksi. Gerakkan lebih dekat."
             }
             return
         }
@@ -926,12 +976,12 @@ extension UnifiedCameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
             DispatchQueue.main.async {
                 self.ocrStatus = "Looking for dates..."
                 self.positioningGuidance = "Move to find numbers or dates"
-                self.accessibilityStatus = "Text found. Looking for expiration date."
+                self.accessibilityStatus = "Teks ditemukan. Mencari tanggal kadaluarsa."
                 
                 // Provide occasional guidance when no numbers found
                 if self.ocrFrameCount % 50 == 0 {  // Every ~10 seconds
-                    self.speakGuidance("Point at expiration date area.", priority: false)
-                    self.accessibilityStatus = "No date found. Try different angle."
+                    self.speakGuidance("Arahkan ke area tanggal kadaluarsa.", priority: false)
+                    self.accessibilityStatus = "Tanggal tidak ditemukan. Coba sudut berbeda."
                 }
             }
             return
@@ -941,7 +991,7 @@ extension UnifiedCameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         DispatchQueue.main.async {
             self.ocrStatus = "Found \(detectedText.count) text elements"
             self.positioningGuidance = "Scanning for expiration dates..."
-            self.accessibilityStatus = "Scanning text for expiration date..."
+            self.accessibilityStatus = "Memindai teks untuk tanggal kadaluarsa..."
         }
         
         // Try to parse expiration date using inline fast parser
@@ -986,23 +1036,28 @@ extension UnifiedCameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
                 self.statusMessage = "✅ DATE DETECTED"
                 self.descriptionMessage = "Expiration date found!"
                 self.positioningGuidance = "Date successfully detected!"
-                self.accessibilityStatus = "Expiration date detected!"
+                self.accessibilityStatus = "Tanggal kadaluarsa terdeteksi!"
                 self.shouldNavigateToResult = true
             }
             
             // Trigger haptic feedback for successful detection (ONCE)
             triggerSuccessHaptic()
             
-            // Announce the found date immediately
-            let formatter = DateFormatter()
-            formatter.dateStyle = .long
-            let dateString = formatter.string(from: date)
-            speakGuidance("Expiration date detected: \(dateString)", priority: true)
+            // CRITICAL: Stop any current TTS to prevent conflict with ResultView
+            stopSpeaking()
+            
+            // Announce the found date with shorter message to prevent overlap
+            speakGuidance("Tanggal terdeteksi", priority: true)
             
             print("✅ Date detected instantly: \(date) - Detection locked")
             
             // Disable OCR processing temporarily instead of stopping session
             self.isOCRProcessingEnabled = false
+            
+            // Stop TTS after a brief moment to ensure clean handoff to ResultView
+            DispatchQueue.main.asyncAfter(deadline: .now() + CAMERA_TTS_CLEANUP_DELAY) {
+                self.stopSpeaking()
+            }
         }
     }
     
@@ -1016,17 +1071,17 @@ extension UnifiedCameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         DispatchQueue.main.async {
             if allText.contains("EXP") || allText.contains("EXPIRE") || allText.contains("BEST") || allText.contains("USE BY") {
                 self.positioningGuidance = "Expiration area found! Hold steady..."
-                self.speakGuidance("Found expiration area, hold steady.", priority: false)
+                self.speakGuidance("Menemukan area kadaluarsa, tahan stabil.", priority: false)
             } else if allText.contains(where: { $0.isNumber }) {
                 // Has numbers but no keywords
                 self.positioningGuidance = "Found numbers, looking for dates..."
-                self.speakGuidance("Scanning numbers for date.", priority: false)
+                self.speakGuidance("Memindai angka untuk tanggal.", priority: false)
             } else if allText.count > 100 {
                 self.positioningGuidance = "Too much text. Focus on expiration area"
-                self.speakGuidance("Move to expiration area.", priority: false)
+                self.speakGuidance("Pindah ke area kadaluarsa.", priority: false)
             } else if allText.count < 10 {
                 self.positioningGuidance = "Move closer to see more text"
-                self.speakGuidance("Move closer.", priority: false)
+                self.speakGuidance("Gerakkan lebih dekat.", priority: false)
             } else {
                 self.positioningGuidance = "Scanning for expiration dates..."
                 // Don't speak this one to avoid too much chatter

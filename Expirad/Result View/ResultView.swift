@@ -6,6 +6,14 @@
 //
 
 import SwiftUI
+import AVFoundation
+
+// MARK: - Timing Configuration  
+private let RESULTVIEW_TTS_DELAY: Double = 1.0 // Time to wait before starting ResultView TTS
+// Adjust this value to control when ResultView TTS starts:
+// - 0.5 = Very fast (may conflict with Camera TTS)
+// - 1.0 = Balanced (current) 
+// - 2.0 = Very safe but slower
 
 enum ExpiredStatus {
     case safe, soon, danger, expired
@@ -147,6 +155,8 @@ struct ExpirationDateView: View {
 struct ResultView: View {
     let detectedDate: Date?
     @Environment(\.dismiss) private var dismiss
+    @State private var speechSynthesizer = AVSpeechSynthesizer()
+    @State private var hasSpoken = false
     
     var body: some View {
         VStack(spacing: 0) {
@@ -224,6 +234,28 @@ struct ResultView: View {
         }
         .background(Color.white)
         .navigationBarBackButtonHidden(true)
+        .onAppear {
+            // CENTRALIZED TTS: Handle both cases in one place to prevent double TTS
+            guard !hasSpoken else { return }
+            
+            // Wait for any Camera TTS to finish before starting ResultView TTS
+            DispatchQueue.main.asyncAfter(deadline: .now() + RESULTVIEW_TTS_DELAY) {
+                if let date = self.detectedDate {
+                    // Case 1: Date detected - speak expiration result
+                    let daysLeft = self.calculateDaysLeft(from: date)
+                    let status = self.getExpiredStatus(for: daysLeft)
+                    self.speakExpirationResult(daysLeft: daysLeft, status: status, date: date)
+                } else {
+                    // Case 2: No date - speak no data message
+                    self.speakNoDataMessage()
+                }
+            }
+            hasSpoken = true
+        }
+        .onDisappear {
+            // Stop speech when leaving the view
+            speechSynthesizer.stopSpeaking(at: .immediate)
+        }
     }
     
     // MARK: - Helper Functions
@@ -253,6 +285,55 @@ struct ResultView: View {
         let formatter = DateFormatter()
         formatter.dateFormat = "dd/MM/yyyy"
         return formatter.string(from: date)
+    }
+    
+    private func speakExpirationResult(daysLeft: Int, status: ExpiredStatus, date: Date) {
+        // SAFETY: Stop any lingering TTS before starting our own
+        speechSynthesizer.stopSpeaking(at: .immediate)
+        
+        // Create Indonesian date formatter for speech
+        let dateFormatter = DateFormatter()
+        dateFormatter.locale = Locale(identifier: "id_ID")
+        dateFormatter.dateFormat = "d MMMM yyyy"
+        let spokenDate = dateFormatter.string(from: date)
+        
+        // Create speech message based on status
+        var message: String
+        
+        if daysLeft < 0 {
+            let daysPast = abs(daysLeft)
+            message = "\(status.message). Obat sudah kadaluarsa \(angkaKeTeks(daysPast)) hari yang lalu. Tanggal kadaluarsa \(spokenDate). Jangan gunakan obat ini."
+        } else if daysLeft == 0 {
+            message = "\(status.message). Obat kadaluarsa hari ini, tanggal \(spokenDate). Sebaiknya jangan digunakan."
+        } else if daysLeft <= 4 {
+            message = "\(status.message). Obat akan kadaluarsa dalam \(angkaKeTeks(daysLeft)) hari lagi. Tanggal kadaluarsa \(spokenDate). Segera gunakan."
+        } else if daysLeft <= 14 {
+            message = "\(status.message). Obat akan kadaluarsa dalam \(angkaKeTeks(daysLeft)) hari lagi. Tanggal kadaluarsa \(spokenDate)."
+        } else {
+            message = "\(status.message). Obat masih aman digunakan. Akan kadaluarsa dalam \(angkaKeTeks(daysLeft)) hari lagi, tanggal \(spokenDate)."
+        }
+        
+        // Configure and speak
+        let utterance = AVSpeechUtterance(string: message)
+        utterance.voice = AVSpeechSynthesisVoice(language: "id-ID") ?? AVSpeechSynthesisVoice(language: "en-US")
+        utterance.rate = 0.5 // Slower speech rate for better comprehension
+        utterance.volume = 1.0
+        
+        speechSynthesizer.speak(utterance)
+    }
+    
+    private func speakNoDataMessage() {
+        // SAFETY: Stop any lingering TTS before starting our own
+        speechSynthesizer.stopSpeaking(at: .immediate)
+        
+        let message = "Tidak ada data. Tanggal kadaluarsa tidak dapat dibaca dari gambar. Silakan coba lagi dengan memfokuskan kamera pada tanggal kadaluarsa yang lebih jelas."
+        
+        let utterance = AVSpeechUtterance(string: message)
+        utterance.voice = AVSpeechSynthesisVoice(language: "id-ID") ?? AVSpeechSynthesisVoice(language: "en-US")
+        utterance.rate = 0.5
+        utterance.volume = 1.0
+        
+        speechSynthesizer.speak(utterance)
     }
 }
 
