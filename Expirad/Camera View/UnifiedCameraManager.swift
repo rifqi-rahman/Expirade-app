@@ -42,7 +42,7 @@ class UnifiedCameraManager: NSObject, ObservableObject {
         lastDetectedDate = nil
         hasSpokenInitialInstructions = false // Allow TTS guidance again
         
-        // IMPORTANT: Stop any lingering TTS from previous session
+        // IMPORTANT: Stop any lingering TTS and cancel pending delayed calls from previous session
         stopSpeaking()
         
         // Re-enable OCR processing and unlock detection
@@ -89,6 +89,9 @@ class UnifiedCameraManager: NSObject, ObservableObject {
     private var hasSpokenInitialInstructions = false
     private var lastGuidanceTime: Date = Date()
     private var lastDetectedText: [String] = []
+    
+    // MARK: - Cancellable TTS Management
+    private var pendingTTSWorkItems: [DispatchWorkItem] = []
     
     // MARK: - Haptic Feedback for Success Detection
     private var hapticEngine: CHHapticEngine?
@@ -400,21 +403,16 @@ class UnifiedCameraManager: NSObject, ObservableObject {
     private func speakInitialInstructions() {
         guard isVoiceGuidanceEnabled else { return }
         
-        // Comprehensive Indonesian guidance with timing
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            self.speakGuidance("Selamat datang di Expirade. Arahkan kamera ke tanggal kadaluarsa pada kemasan obat.", priority: true)
-        }
+        // Cancel any existing pending TTS first
+        cancelAllPendingTTS()
         
-        DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
-            self.speakGuidance("Tahan kamera stabil sekitar 15 sentimeter dari kemasan. Pastikan pencahayaan cukup.", priority: true)
-        }
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 7.5) {
-            self.speakGuidance("Cari tulisan EXP, kadaluarsa, atau tanggal pada kemasan obat. Ketuk dua kali untuk fokus.", priority: true)
-        }
+        // Schedule cancellable Indonesian guidance with timing
+        scheduleTTS(delay: 1.0, message: "Selamat datang. Arahkan kamera pada kemasan.")
+        scheduleTTS(delay: 4.0, message: "Tahan kamera stabil sekitar 20 sentimeter dari kemasan.")
+        scheduleTTS(delay: 7.5, message: "Coba arahkan kamera ke beberapa sisi kemasan. Ketuk dua kali untuk fokus.")
         
         hasSpokenInitialInstructions = true
-        print("🔊 Comprehensive Indonesian TTS guidance started")
+        print("🔊 Scheduled 3 cancellable Indonesian TTS guidance messages")
     }
     
     func speakGuidance(_ message: String, priority: Bool = false) {
@@ -449,38 +447,47 @@ class UnifiedCameraManager: NSObject, ObservableObject {
     
     func stopSpeaking() {
         speechSynthesizer.stopSpeaking(at: .immediate)
+        cancelAllPendingTTS()
+    }
+    
+    // MARK: - Cancellable TTS Management
+    private func cancelAllPendingTTS() {
+        // Cancel all pending delayed TTS calls
+        let cancelledCount = pendingTTSWorkItems.count
+        for workItem in pendingTTSWorkItems {
+            workItem.cancel()
+        }
+        pendingTTSWorkItems.removeAll()
+        if cancelledCount > 0 {
+            print("🚫 Cancelled \(cancelledCount) pending TTS calls")
+        }
+    }
+    
+    private func scheduleTTS(delay: Double, message: String, priority: Bool = true) {
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.speakGuidance(message, priority: priority)
+        }
+        
+        pendingTTSWorkItems.append(workItem)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
     }
     
     // MARK: - Additional Indonesian Help Functions
     func speakDetailedHelp() {
         guard isVoiceGuidanceEnabled else { return }
         
-        // Completely stop any current speech and reset
+        // Completely stop any current speech and cancel pending TTS
         stopSpeaking()
         
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            self.speakGuidance("Panduan lengkap Expirade:", priority: true)
-        }
+        // Schedule cancellable detailed help guidance
+        scheduleTTS(delay: 0.5, message: "Panduan lengkap Expirade:")
+        scheduleTTS(delay: 3.0, message: "Pertama, pastikan kemasan obat dalam pencahayaan yang cukup.")
+        scheduleTTS(delay: 6.0, message: "Kedua, cari tulisan EXP, kadaluarsa, atau tanggal pada kemasan.")
+        scheduleTTS(delay: 9.0, message: "Ketiga, arahkan kamera tepat ke area tanggal tersebut.")
+        scheduleTTS(delay: 12.0, message: "Tahan kamera stabil sekitar 15 sentimeter dari kemasan.")
+        scheduleTTS(delay: 15.0, message: "Aplikasi akan memberikan getaran dan suara ketika tanggal terdeteksi.")
         
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-            self.speakGuidance("Pertama, pastikan kemasan obat dalam pencahayaan yang cukup.", priority: true)
-        }
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) {
-            self.speakGuidance("Kedua, cari tulisan EXP, kadaluarsa, atau tanggal pada kemasan.", priority: true)
-        }
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 9.0) {
-            self.speakGuidance("Ketiga, arahkan kamera tepat ke area tanggal tersebut.", priority: true)
-        }
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 12.0) {
-            self.speakGuidance("Tahan kamera stabil sekitar 15 sentimeter dari kemasan.", priority: true)
-        }
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 15.0) {
-            self.speakGuidance("Aplikasi akan memberikan getaran dan suara ketika tanggal terdeteksi.", priority: true)
-        }
+        print("🔊 Scheduled 6 cancellable detailed help messages")
     }
     
     // MARK: - Comprehensive Real-World Expiration Date Parser
@@ -1071,11 +1078,11 @@ extension UnifiedCameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         DispatchQueue.main.async {
             if allText.contains("EXP") || allText.contains("EXPIRE") || allText.contains("BEST") || allText.contains("USE BY") {
                 self.positioningGuidance = "Expiration area found! Hold steady..."
-                self.speakGuidance("Menemukan area kadaluarsa, tahan stabil.", priority: false)
+                self.speakGuidance("Mencari area kadaluarsa, tahan stabil.", priority: false)
             } else if allText.contains(where: { $0.isNumber }) {
                 // Has numbers but no keywords
                 self.positioningGuidance = "Found numbers, looking for dates..."
-                self.speakGuidance("Memindai angka untuk tanggal.", priority: false)
+                self.speakGuidance("Memindai angka untuk tanggal.", prior ity: false)
             } else if allText.count > 100 {
                 self.positioningGuidance = "Too much text. Focus on expiration area"
                 self.speakGuidance("Pindah ke area kadaluarsa.", priority: false)

@@ -15,15 +15,9 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                // Top section with title and buttons
+                // Buttons section  
                 VStack(spacing: 16) {
-                    // Title
-                    Text("Camera")
-                        .font(.title2)
-                        .fontWeight(.medium)
-                        .foregroundColor(.black)
-                    
-                    // Buttons HStack
+                    // Buttons HStacmek
                     HStack {
                         // Flash button
                         Button(action: {
@@ -58,7 +52,7 @@ struct ContentView: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
                         }
                         .accessibilityLabel("Tombol bantuan")
-                        .accessibilityHint("Ketuk dua kali untuk mendengar instruksi pemindaian")
+                        .accessibilityHint("Ketuk dua kali untuk instruksi singkat, atau tahan lama untuk panduan lengkap")
                         .onLongPressGesture {
                             // Detailed help on long press
                             cameraManager.speakDetailedHelp()
@@ -101,6 +95,8 @@ struct ContentView: View {
                                     .padding(.vertical, 6)
                                     .background(Color.black.opacity(0.8))
                                     .cornerRadius(20)
+                                    .accessibilityLabel("Kamera aktif")
+                                    .accessibilityHint("Indikator bahwa kamera sedang berjalan")
                                     
                                     Spacer()
                                     
@@ -117,6 +113,8 @@ struct ContentView: View {
                                     .padding(.vertical, 6)
                                     .background(Color.black.opacity(0.8))
                                     .cornerRadius(20)
+                                    .accessibilityLabel("Pemindai teks aktif")
+                                    .accessibilityHint("Indikator bahwa sistem pembaca teks sedang berjalan")
                                 }
                                 .padding(.top, 16)
                                 .padding(.horizontal, 16)
@@ -138,6 +136,8 @@ struct ContentView: View {
                                         .foregroundColor(.white.opacity(0.8))
                                 }
                             )
+                            .accessibilityLabel("Memuat kamera")
+                            .accessibilityHint("Kamera sedang mempersiapkan diri untuk memindai tanggal kadaluarsa")
                     }
                     
                     // Clean accessibility status for VoiceOver users
@@ -174,6 +174,8 @@ struct ContentView: View {
                 }
             }
             .background(Color.white)
+            .navigationTitle("Kamera")
+            .navigationBarTitleDisplayMode(.inline)
             .navigationBarBackButtonHidden(true)
             .navigationDestination(isPresented: $cameraManager.shouldNavigateToResult) {
                 ResultView(detectedDate: cameraManager.detectedDate)
