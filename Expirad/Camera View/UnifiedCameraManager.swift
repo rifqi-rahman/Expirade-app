@@ -1082,7 +1082,7 @@ extension UnifiedCameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
             } else if allText.contains(where: { $0.isNumber }) {
                 // Has numbers but no keywords
                 self.positioningGuidance = "Found numbers, looking for dates..."
-                self.speakGuidance("Memindai angka untuk tanggal.", prior ity: false)
+                self.speakGuidance("Memindai angka untuk tanggal.", priority: false)
             } else if allText.count > 100 {
                 self.positioningGuidance = "Too much text. Focus on expiration area"
                 self.speakGuidance("Pindah ke area kadaluarsa.", priority: false)
