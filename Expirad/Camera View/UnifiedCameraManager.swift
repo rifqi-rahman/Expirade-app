@@ -23,9 +23,10 @@ class UnifiedCameraManager: NSObject, ObservableObject {
     @Published var ocrStatus = "No text detected yet"
     @Published var detectedDate: Date?
     @Published var shouldNavigateToResult = false
-    @Published var positioningGuidance = "Hold steady, scanning for text..."
+        @Published var positioningGuidance = "Hold steady, scanning for text..."
+    @Published var previewRefreshID = UUID() // Force SwiftUI to refresh preview layer
     
-        // MARK: - Camera Control Methods
+    // MARK: - Camera Control Methods
     func resetForNewScan() {
         detectedDate = nil
         shouldNavigateToResult = false
@@ -35,6 +36,9 @@ class UnifiedCameraManager: NSObject, ObservableObject {
         
         // Re-enable OCR processing
         isOCRProcessingEnabled = true
+        
+        // Force SwiftUI to refresh the preview layer by changing its ID
+        previewRefreshID = UUID()
         
         // Update UI - camera session should still be running
         DispatchQueue.main.async {

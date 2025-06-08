@@ -68,6 +68,7 @@ struct ContentView: View {
                         // Show real camera preview
                         ZStack {
                             CameraPreview(previewLayer: previewLayer)
+                                .id(cameraManager.previewRefreshID) // Force refresh when ID changes
                             
                             // Overlay UI elements
                             VStack {

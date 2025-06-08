@@ -34,6 +34,14 @@ struct CameraPreview: UIViewRepresentable {
         // Update the preview layer frame when the view bounds change
         DispatchQueue.main.async {
             self.previewLayer.frame = uiView.bounds
+            
+            // Ensure the preview layer is properly attached and rendering
+            if self.previewLayer.superlayer != uiView.layer {
+                // Remove from old parent if exists
+                self.previewLayer.removeFromSuperlayer()
+                // Add to new parent
+                uiView.layer.addSublayer(self.previewLayer)
+            }
         }
     }
 }
