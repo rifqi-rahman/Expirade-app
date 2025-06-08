@@ -34,8 +34,9 @@ class UnifiedCameraManager: NSObject, ObservableObject {
         lastDetectedDate = nil
         hasSpokenInitialInstructions = false // Allow TTS guidance again
         
-        // Re-enable OCR processing
+        // Re-enable OCR processing and unlock detection
         isOCRProcessingEnabled = true
+        isDetectionInProgress = false // Unlock for new detection session
         
         // Force SwiftUI to refresh the preview layer by changing its ID
         previewRefreshID = UUID()
@@ -68,6 +69,7 @@ class UnifiedCameraManager: NSObject, ObservableObject {
     private let requiredConfidenceFrames = 1 // Reduce to 1 for faster detection
     private var lastDetectedDate: Date?
     private var isOCRProcessingEnabled = true // Control OCR processing without stopping session
+    private var isDetectionInProgress = false // Prevent multiple simultaneous detections
     
     // MARK: - Text-to-Speech for Accessibility
     private let speechSynthesizer = AVSpeechSynthesizer()
@@ -946,6 +948,12 @@ extension UnifiedCameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
     }
     
     private func handleSuccessfulDateDetection(_ date: Date, from texts: [String]) {
+        // CRITICAL: Prevent multiple simultaneous detections
+        guard !isDetectionInProgress else {
+            print("🔒 Detection already in progress, skipping duplicate")
+            return
+        }
+        
         // Fast detection - check if it's the same date to avoid duplicates
         if let lastDate = lastDetectedDate, 
            Calendar.current.isDate(date, inSameDayAs: lastDate) {
@@ -962,6 +970,9 @@ extension UnifiedCameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         
         // Immediate detection with just 1 confirmation for speed
         if detectionConfidenceCount >= requiredConfidenceFrames {
+            // IMMEDIATELY lock further detections
+            isDetectionInProgress = true
+            
             DispatchQueue.main.async {
                 self.detectedDate = date
                 self.statusMessage = "✅ DATE DETECTED"
@@ -970,7 +981,7 @@ extension UnifiedCameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
                 self.shouldNavigateToResult = true
             }
             
-            // Trigger haptic feedback for successful detection
+            // Trigger haptic feedback for successful detection (ONCE)
             triggerSuccessHaptic()
             
             // Announce the found date immediately
@@ -979,7 +990,7 @@ extension UnifiedCameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
             let dateString = formatter.string(from: date)
             speakGuidance("Expiration date detected: \(dateString)", priority: true)
             
-            print("✅ Date detected instantly: \(date)")
+            print("✅ Date detected instantly: \(date) - Detection locked")
             
             // Disable OCR processing temporarily instead of stopping session
             self.isOCRProcessingEnabled = false
