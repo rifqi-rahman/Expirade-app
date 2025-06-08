@@ -25,6 +25,7 @@ class UnifiedCameraManager: NSObject, ObservableObject {
     @Published var shouldNavigateToResult = false
         @Published var positioningGuidance = "Hold steady, scanning for text..."
     @Published var previewRefreshID = UUID() // Force SwiftUI to refresh preview layer
+    @Published var accessibilityStatus = "Scanning..." // Simple status for VoiceOver users
     
     // MARK: - Camera Control Methods
     func resetForNewScan() {
@@ -49,6 +50,7 @@ class UnifiedCameraManager: NSObject, ObservableObject {
             self.isCameraActive = true
             self.positioningGuidance = "Ready! Point camera at medicine package"
             self.ocrStatus = "Looking for dates..."
+            self.accessibilityStatus = "Ready to scan new package"
             
             // Restart TTS guidance for new scan
             if self.isVoiceGuidanceEnabled {
@@ -110,6 +112,7 @@ class UnifiedCameraManager: NSObject, ObservableObject {
         if isPreview {
             statusMessage = "🔍 PREVIEW MODE"
             descriptionMessage = "Preview Display\nRun app for real camera"
+            accessibilityStatus = "Preview mode"
             isCameraActive = false
             
             // Provide TTS feedback even in preview
@@ -121,6 +124,7 @@ class UnifiedCameraManager: NSObject, ObservableObject {
         } else {
             statusMessage = "📷 CAMERA READY"
             descriptionMessage = "OCR Processing Running\nPoint at expiration date"
+            accessibilityStatus = "Ready to scan"
             isCameraActive = true
         }
     }
@@ -418,7 +422,7 @@ class UnifiedCameraManager: NSObject, ObservableObject {
         
         let utterance = AVSpeechUtterance(string: message)
         utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
-        utterance.rate = 0.6  // Slightly faster for better responsiveness
+        utterance.rate = 0.5  // Normal speed for better comprehension by blind users
         utterance.volume = 1.0  // Full volume for accessibility
         utterance.pitchMultiplier = 1.0
         
@@ -908,6 +912,7 @@ extension UnifiedCameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
             DispatchQueue.main.async {
                 self.ocrStatus = "Looking for text..."
                 self.positioningGuidance = "Move camera closer to text"
+                self.accessibilityStatus = "No text detected. Move closer."
             }
             return
         }
@@ -921,10 +926,12 @@ extension UnifiedCameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
             DispatchQueue.main.async {
                 self.ocrStatus = "Looking for dates..."
                 self.positioningGuidance = "Move to find numbers or dates"
+                self.accessibilityStatus = "Text found. Looking for expiration date."
                 
                 // Provide occasional guidance when no numbers found
                 if self.ocrFrameCount % 50 == 0 {  // Every ~10 seconds
                     self.speakGuidance("Point at expiration date area.", priority: false)
+                    self.accessibilityStatus = "No date found. Try different angle."
                 }
             }
             return
@@ -934,6 +941,7 @@ extension UnifiedCameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         DispatchQueue.main.async {
             self.ocrStatus = "Found \(detectedText.count) text elements"
             self.positioningGuidance = "Scanning for expiration dates..."
+            self.accessibilityStatus = "Scanning text for expiration date..."
         }
         
         // Try to parse expiration date using inline fast parser
@@ -978,6 +986,7 @@ extension UnifiedCameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
                 self.statusMessage = "✅ DATE DETECTED"
                 self.descriptionMessage = "Expiration date found!"
                 self.positioningGuidance = "Date successfully detected!"
+                self.accessibilityStatus = "Expiration date detected!"
                 self.shouldNavigateToResult = true
             }
             

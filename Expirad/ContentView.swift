@@ -36,6 +36,8 @@ struct ContentView: View {
                                 .background(cameraManager.isFlashlightOn ? Color.yellow : Color.black)
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
                         }
+                        .accessibilityLabel(cameraManager.isFlashlightOn ? "Flashlight is on" : "Flashlight is off")
+                        .accessibilityHint("Double tap to toggle flashlight")
                         
                         Spacer()
                         
@@ -43,7 +45,7 @@ struct ContentView: View {
                         Button(action: {
                             // Help action - speak guidance
                             cameraManager.stopSpeaking()
-                            let helpMessage = "Arahkan hape kamera ke arah kemasan obat"
+                            let helpMessage = "Point camera at medicine package expiration date"
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                                 cameraManager.speakGuidance(helpMessage, priority: true)
                             }
@@ -55,6 +57,8 @@ struct ContentView: View {
                                 .background(Color.black)
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
                         }
+                        .accessibilityLabel("Help button")
+                        .accessibilityHint("Double tap to hear instructions for scanning")
                     }
                     .padding(.horizontal, 32)
                 }
@@ -69,6 +73,12 @@ struct ContentView: View {
                         ZStack {
                             CameraPreview(previewLayer: previewLayer)
                                 .id(cameraManager.previewRefreshID) // Force refresh when ID changes
+                                .onTapGesture {
+                                    // Help camera focus when user taps screen
+                                    cameraManager.speakGuidance("Focusing camera", priority: false)
+                                }
+                                .accessibilityLabel("Camera viewfinder")
+                                .accessibilityHint("Double tap to help camera focus on expiration date")
                             
                             // Overlay UI elements
                             VStack {
@@ -126,53 +136,36 @@ struct ContentView: View {
                             )
                     }
                     
-                    // Overlay information with semi-transparent background
-        VStack {
+                    // Clean accessibility status for VoiceOver users
+                    VStack {
                         Spacer()
                         
-                        VStack(spacing: 12) {
-                            Text(cameraManager.statusMessage)
-                                .foregroundColor(.white)
-                                .fontWeight(.bold)
-                                .font(.title3)
-                                .shadow(color: .black, radius: 2)
-                            
-                            Text(cameraManager.descriptionMessage)
-                                .foregroundColor(.white.opacity(0.9))
-                                .multilineTextAlignment(.center)
-                                .font(.body)
-                                .shadow(color: .black, radius: 1)
-                            
-                            // Enhanced positioning guidance
-                            Text(cameraManager.positioningGuidance)
-                                .foregroundColor(.yellow)
-                                .multilineTextAlignment(.center)
-                                .font(.subheadline)
-                                .fontWeight(.semibold)
-                                .shadow(color: .black, radius: 1)
-                            
-                            Text("💡 Flashlight: \(cameraManager.isFlashlightOn ? "ON" : "OFF")")
-                                .foregroundColor(cameraManager.isFlashlightOn ? .yellow : .white.opacity(0.8))
-                                .font(.caption)
-                                .fontWeight(.semibold)
-                                .shadow(color: .black, radius: 1)
-                            
-                            // Debug information with dark background
-                            VStack(spacing: 4) {
-                                Text("Debug: \(cameraManager.debugInfo)")
-                                    .foregroundColor(.green)
-                                    .font(.caption2)
-                                
-                                Text("OCR: \(cameraManager.ocrStatus)")
-                                    .foregroundColor(.cyan)
-                                    .font(.caption2)
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(Color.black.opacity(0.7))
-                            .cornerRadius(8)
-                        }
-                        .padding(.bottom, 30)
+                        // Primary accessibility status
+                        Text(cameraManager.accessibilityStatus)
+                            .foregroundColor(.white)
+                            .fontWeight(.bold)
+                            .font(.title2)
+                            .multilineTextAlignment(.center)
+                            .shadow(color: .black, radius: 2)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 12)
+                            .background(Color.black.opacity(0.8))
+                            .cornerRadius(12)
+                            .accessibilityLabel(cameraManager.accessibilityStatus)
+                            .accessibilityAddTraits(.updatesFrequently)
+                        
+                        Spacer().frame(height: 40)
+                        
+                        // Tap to focus hint (VoiceOver friendly)
+                        Text("Tap center of screen to help camera focus")
+                            .foregroundColor(.white.opacity(0.8))
+                            .font(.body)
+                            .multilineTextAlignment(.center)
+                            .shadow(color: .black, radius: 1)
+                            .accessibilityLabel("Tap center of screen to help camera focus on expiration date")
+                            .accessibilityHint("Double tap to activate camera focus")
+                        
+                        Spacer().frame(height: 30)
                     }
                 }
             }

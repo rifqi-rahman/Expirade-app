@@ -7,6 +7,143 @@
 
 import SwiftUI
 
+enum ExpiredStatus {
+    case safe, soon, danger, expired
+    
+    var color: Color {
+        switch self {
+        case .safe: return .green
+        case .soon: return .yellow
+        case .danger: return .red
+        case .expired: return .gray
+        }
+    }
+    
+    var message: String {
+        switch self {
+        case .safe: return "Aman!"
+        case .soon: return "Segera!"
+        case .danger: return "Bahaya!"
+        case .expired: return "Tidak Bisa Dipakai!"
+        }
+    }
+    
+    var iconName: String {
+        switch self {
+        case .safe: return "checkmark.circle.fill"
+        case .soon: return "exclamationmark.triangle.fill"
+        case .danger: return "exclamationmark.circle.fill"
+        case .expired: return "xmark.circle.fill"
+        }
+    }
+}
+
+// MARK: - Helper Functions for Indonesian Text
+func angkaKeTeks(_ angka: Int) -> String {
+    let satuan = ["", "satu", "dua", "tiga", "empat", "lima", "enam", "tujuh", "delapan", "sembilan"]
+    let belasan = ["sepuluh", "sebelas", "dua belas", "tiga belas", "empat belas", "lima belas", "enam belas", "tujuh belas", "delapan belas", "sembilan belas"]
+    let puluhan = ["", "", "dua puluh", "tiga puluh", "empat puluh", "lima puluh", "enam puluh", "tujuh puluh", "delapan puluh", "sembilan puluh"]
+    
+    if angka < 0 {
+        return "minus \(angkaKeTeks(-angka))"
+    } else if angka < 10 {
+        return satuan[angka]
+    } else if angka < 20 {
+        return belasan[angka - 10]
+    } else if angka < 100 {
+        let puluh = angka / 10
+        let sisa = angka % 10
+        return "\(puluhan[puluh])\(sisa > 0 ? " \(satuan[sisa])" : "")"
+    } else {
+        return "\(angka)"
+    }
+}
+
+// MARK: - Modular Components
+
+struct StatusCircleView: View {
+    let status: ExpiredStatus
+    
+    var iconName: String {
+        switch status {
+        case .expired:
+            return "xmark"
+        case .danger:
+            return "exclamationmark.triangle"
+        case .soon:
+            return "exclamationmark.circle"
+        case .safe:
+            return "checkmark"
+        }
+    }
+    
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(status.color)
+                .frame(width: 200, height: 200)
+            
+            Image(systemName: iconName)
+                .font(.system(size: 80, weight: .bold))
+                .foregroundColor(.black)
+                .accessibilityHidden(true)
+                .accessibilityElement()
+                .accessibilityLabel("Status: \(status.message)")
+        }
+    }
+}
+
+struct CountdownTextView: View {
+    let daysLeft: Int
+    
+    var body: some View {
+        let absoluteDays = abs(daysLeft)
+        let isOverdue = daysLeft < 0
+        
+        VStack(spacing: 4) {
+            Text("\(absoluteDays)")
+                .font(.system(size: 80, weight: .bold))
+                .accessibilityLabel(
+                    isOverdue 
+                    ? "Terlewat \(angkaKeTeks(absoluteDays)) hari"
+                    : "Tersisa \(angkaKeTeks(absoluteDays)) hari"
+                )
+            
+            Text(isOverdue ? "Hari lalu" : "Hari lagi")
+                .font(.title3)
+                .accessibilityHidden(true)
+        }
+    }
+}
+
+struct ExpirationDateView: View {
+    let expirationDate: Date
+    
+    var spokenDate: String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "id_ID")
+        formatter.dateFormat = "d MMMM yyyy"
+        return formatter.string(from: expirationDate)
+    }
+    
+    var body: some View {
+        let formattedDate = expirationDate.formatted(date: .numeric, time: .omitted)
+        
+        VStack(spacing: 4) {
+            Text("Kadaluarsa")
+                .font(.title3)
+                .accessibilityHidden(true)
+            
+            Text(formattedDate)
+                .font(.title)
+                .bold()
+                .accessibilityLabel("Tanggal kadaluarsa: \(spokenDate)")
+        }
+    }
+}
+
+// MARK: - Main ResultView
+
 struct ResultView: View {
     let detectedDate: Date?
     @Environment(\.dismiss) private var dismiss
@@ -35,48 +172,27 @@ struct ResultView: View {
             
             // Main Content
             if let date = detectedDate {
-                let daysRemaining = calculateDaysRemaining(from: date)
-                let status = getStatus(for: daysRemaining)
+                let daysLeft = calculateDaysLeft(from: date)
+                let status = getExpiredStatus(for: daysLeft)
                 
                 VStack(spacing: 40) {
-                    // Large Status Circle with Icon
-                    ZStack {
-                        Circle()
-                            .fill(status.color)
-                            .frame(width: 200, height: 200)
-                        
-                        Image(systemName: status.iconName)
-                            .font(.system(size: 60, weight: .bold))
-                            .foregroundColor(.black)
-                    }
+                    // Status Circle Component
+                    StatusCircleView(status: status)
+                        .frame(width: 200, height: 200)
                     
                     // Status Text
                     Text(status.message)
                         .font(.system(size: 36, weight: .bold))
                         .foregroundColor(.black)
                     
-                    VStack(spacing: 8) {
-                        // Days Remaining
-                        Text("\(max(daysRemaining, 0))")
-                            .font(.system(size: 72, weight: .bold))
-                            .foregroundColor(.black)
-                        
-                        Text("Hari lagi")
-                            .font(.system(size: 24, weight: .medium))
-                            .foregroundColor(.black)
-                    }
+                    // Countdown Text Component with Indonesian numbers
+                    CountdownTextView(daysLeft: daysLeft)
+                        .foregroundColor(.black)
                     
-                    VStack(spacing: 8) {
-                        // Expiration Label
-                        Text("Kadaluarsa")
-                            .font(.system(size: 20, weight: .medium))
-                            .foregroundColor(.black)
-                        
-                        // Full Date
-                        Text(formatDateIndonesian(date))
-                            .font(.system(size: 32, weight: .bold))
-                            .foregroundColor(.black)
-                    }
+                    // Expiration Date Component
+                    ExpirationDateView(expirationDate: date)
+                        .foregroundColor(.black)
+                        .padding(.top, 24)
                 }
                 
             } else {
@@ -112,7 +228,7 @@ struct ResultView: View {
     
     // MARK: - Helper Functions
     
-    private func calculateDaysRemaining(from date: Date) -> Int {
+    private func calculateDaysLeft(from date: Date) -> Int {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
         let expirationDate = calendar.startOfDay(for: date)
@@ -121,16 +237,15 @@ struct ResultView: View {
         return components.day ?? 0
     }
     
-    private func getStatus(for daysRemaining: Int) -> (color: Color, iconName: String, message: String) {
-        if daysRemaining <= 0 {
-            // Danger (Red): remaining days <= 0
-            return (Color.red, "xmark.circle.fill", "Bahaya!")
-        } else if daysRemaining >= 1 && daysRemaining <= 30 {
-            // Immediate (Yellow): remaining days between 1 and 30
-            return (Color.yellow, "exclamationmark.triangle.fill", "Segera!")
+    private func getExpiredStatus(for daysLeft: Int) -> ExpiredStatus {
+        if daysLeft < 0 {
+            return .expired
+        } else if daysLeft <= 4 {
+            return .danger
+        } else if daysLeft <= 14 {
+            return .soon
         } else {
-            // Safe (Green): remaining days > 30
-            return (Color.green, "checkmark.circle.fill", "Aman!")
+            return .safe
         }
     }
     
@@ -145,21 +260,21 @@ struct ResultView: View {
 struct ResultView_Previews: PreviewProvider {
     static var previews: some View {
         Group {
-            // Safe (Green) - More than 30 days
-            ResultView(detectedDate: Calendar.current.date(byAdding: .day, value: 45, to: Date()))
-                .previewDisplayName("Safe - 45 days")
+            // Safe (Green) - More than 14 days
+            ResultView(detectedDate: Calendar.current.date(byAdding: .day, value: 30, to: Date()))
+                .previewDisplayName("Safe - 30 days")
             
-            // Immediate (Yellow) - 1-30 days  
-            ResultView(detectedDate: Calendar.current.date(byAdding: .day, value: 15, to: Date()))
-                .previewDisplayName("Immediate - 15 days")
+            // Soon (Yellow) - 5-14 days  
+            ResultView(detectedDate: Calendar.current.date(byAdding: .day, value: 10, to: Date()))
+                .previewDisplayName("Soon - 10 days")
             
-            // Immediate (Yellow) - 1 day
-            ResultView(detectedDate: Calendar.current.date(byAdding: .day, value: 1, to: Date()))
-                .previewDisplayName("Immediate - 1 day")
+            // Danger (Red) - 1-4 days
+            ResultView(detectedDate: Calendar.current.date(byAdding: .day, value: 2, to: Date()))
+                .previewDisplayName("Danger - 2 days")
             
-            // Danger (Red) - Expired
+            // Expired (Gray) - Past expiration
             ResultView(detectedDate: Calendar.current.date(byAdding: .day, value: -5, to: Date()))
-                .previewDisplayName("Danger - Expired")
+                .previewDisplayName("Expired - 5 days ago")
             
             // Danger (Red) - Expires today
             ResultView(detectedDate: Date())
