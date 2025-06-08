@@ -60,7 +60,7 @@ struct ContentView: View {
                     }
                     .padding(.horizontal, 32)
                 }
-                .padding(.top, 20)
+                .padding(.top, 8)
                 .padding(.bottom, 16)
                 .background(Color.white)
                 
@@ -141,16 +141,16 @@ struct ContentView: View {
                     }
                     
                     // Clean accessibility status for VoiceOver users
-                    VStack {
+        VStack {
                         Spacer()
                         
                         // Primary accessibility status
                         Text(cameraManager.accessibilityStatus)
-                            .foregroundColor(.white)
-                            .fontWeight(.bold)
+                                .foregroundColor(.white)
+                                .fontWeight(.bold)
                             .font(.title2)
                             .multilineTextAlignment(.center)
-                            .shadow(color: .black, radius: 2)
+                                .shadow(color: .black, radius: 2)
                             .padding(.horizontal, 20)
                             .padding(.vertical, 12)
                             .background(Color.black.opacity(0.8))
@@ -164,8 +164,8 @@ struct ContentView: View {
                         Text("Ketuk tengah layar untuk membantu fokus kamera")
                             .foregroundColor(.white.opacity(0.8))
                             .font(.body)
-                            .multilineTextAlignment(.center)
-                            .shadow(color: .black, radius: 1)
+                                .multilineTextAlignment(.center)
+                                .shadow(color: .black, radius: 1)
                             .accessibilityLabel("Ketuk tengah layar untuk membantu kamera fokus pada tanggal kadaluarsa")
                             .accessibilityHint("Ketuk dua kali untuk mengaktifkan fokus kamera")
                         
