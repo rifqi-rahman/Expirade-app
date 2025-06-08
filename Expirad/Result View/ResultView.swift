@@ -9,13 +9,15 @@ import SwiftUI
 
 struct ResultView: View {
     let detectedDate: Date?
+    @Environment(\.dismiss) private var dismiss
     
     var body: some View {
         VStack(spacing: 0) {
             // Top Navigation
             HStack {
                 Button(action: {
-                    // Back button action - handled by navigation
+                    // Navigate back to camera view
+                    dismiss()
                 }) {
                     Image(systemName: "arrow.left")
                         .font(.title2)

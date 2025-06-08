@@ -43,7 +43,7 @@ struct ContentView: View {
                         Button(action: {
                             // Help action - speak guidance
                             cameraManager.stopSpeaking()
-                            let helpMessage = "Point your camera at a medicine package expiration date. Move closer if text is too small. I will guide you to find the date."
+                            let helpMessage = "Arahkan hape kamera ke arah kemasan obat"
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                                 cameraManager.speakGuidance(helpMessage, priority: true)
                             }
@@ -126,7 +126,7 @@ struct ContentView: View {
                     }
                     
                     // Overlay information with semi-transparent background
-                    VStack {
+        VStack {
                         Spacer()
                         
                         VStack(spacing: 12) {
@@ -179,6 +179,13 @@ struct ContentView: View {
             .navigationBarBackButtonHidden(true)
             .navigationDestination(isPresented: $cameraManager.shouldNavigateToResult) {
                 ResultView(detectedDate: cameraManager.detectedDate)
+            }
+            .onChange(of: cameraManager.shouldNavigateToResult) { oldValue, newValue in
+                // When returning from ResultView (newValue becomes false)
+                if oldValue == true && newValue == false {
+                    // Reset camera for new scan
+                    cameraManager.resetForNewScan()
+                }
             }
             .onAppear {
                 cameraManager.requestPermissionAndStartSession()
