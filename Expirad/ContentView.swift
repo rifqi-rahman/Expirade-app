@@ -17,7 +17,7 @@ struct ContentView: View {
             VStack(spacing: 0) {
                 // Buttons section  
                 VStack(spacing: 16) {
-                    // Buttons HStacmek
+                    // Buttons HStack
                     HStack {
                         // Flash button
                         Button(action: {
