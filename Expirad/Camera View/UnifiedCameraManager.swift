@@ -34,6 +34,16 @@ class UnifiedCameraManager: NSObject, ObservableObject {
     @Published var previewRefreshID = UUID() // Force SwiftUI to refresh preview layer
     @Published var accessibilityStatus = "Scanning..." // Simple status for VoiceOver users
     
+    // --- Drug Name Detection Phase ---
+    enum OCRPhase {
+        case drugName
+        case expirationDate
+    }
+    
+    @Published var ocrPhase: OCRPhase = .drugName
+    @Published var detectedDrugName: String? = nil
+    @Published var showDrugNameAlert: Bool = false
+    
     // MARK: - Camera Control Methods
     func resetForNewScan() {
         detectedDate = nil
@@ -41,6 +51,11 @@ class UnifiedCameraManager: NSObject, ObservableObject {
         detectionConfidenceCount = 0
         lastDetectedDate = nil
         hasSpokenInitialInstructions = false // Allow TTS guidance again
+        
+        // Reset to drug name phase
+        ocrPhase = .drugName
+        detectedDrugName = nil
+        showDrugNameAlert = false
         
         // IMPORTANT: Stop any lingering TTS and cancel pending delayed calls from previous session
         stopSpeaking()
@@ -54,13 +69,13 @@ class UnifiedCameraManager: NSObject, ObservableObject {
         
         // Update UI - camera session should still be running
         DispatchQueue.main.async {
-            self.statusMessage = "📷 CAMERA ACTIVE"
-            self.descriptionMessage = "OCR Processing Running\nPoint at expiration date"
+            self.statusMessage = "💊 SCANNING DRUG NAME"
+            self.descriptionMessage = "OCR Processing Running\nPoint at drug name first"
             self.debugInfo = "Camera running, OCR active"
             self.isCameraActive = true
-            self.positioningGuidance = "Ready! Point camera at medicine package"
-            self.ocrStatus = "Looking for dates..."
-            self.accessibilityStatus = "Siap memindai kemasan baru"
+            self.positioningGuidance = "Ready! Point camera at drug name"
+            self.ocrStatus = "Looking for drug names..."
+            self.accessibilityStatus = "Siap memindai nama obat"
             
             // Restart TTS guidance for new scan
             if self.isVoiceGuidanceEnabled {
@@ -68,7 +83,7 @@ class UnifiedCameraManager: NSObject, ObservableObject {
             }
         }
         
-        print("✅ OCR processing re-enabled for new scan")
+        print("✅ OCR processing re-enabled for new scan - Drug Name Phase")
     }
     
     // MARK: - Private Properties
@@ -135,10 +150,11 @@ class UnifiedCameraManager: NSObject, ObservableObject {
                 }
             }
         } else {
-            statusMessage = "📷 CAMERA READY"
-            descriptionMessage = "OCR Processing Running\nPoint at expiration date"
-            accessibilityStatus = "Siap memindai"
+            statusMessage = "💊 SCANNING DRUG NAME"
+            descriptionMessage = "OCR Processing Running\nPoint at drug name first"
+            accessibilityStatus = "Siap memindai nama obat"
             isCameraActive = true
+            ocrPhase = .drugName // Ensure we start with drug name phase
         }
     }
     
@@ -327,11 +343,12 @@ class UnifiedCameraManager: NSObject, ObservableObject {
             // Give camera a moment to stabilize before declaring active
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 if session.isRunning {
-                    self.statusMessage = "📷 CAMERA ACTIVE"
-                    self.descriptionMessage = "OCR Processing Running\nPoint at expiration date"
+                    self.statusMessage = "💊 SCANNING DRUG NAME"
+                    self.descriptionMessage = "OCR Processing Running\nPoint at drug name first"
                     self.debugInfo = "Camera running, OCR active"
                     self.isCameraActive = true
-                    self.positioningGuidance = "Ready! Point camera at medicine package"
+                    self.positioningGuidance = "Ready! Point camera at drug name"
+                    self.ocrPhase = .drugName // Ensure we start with drug name phase
                     
                     // Start TTS guidance once camera is fully ready
                     if self.isVoiceGuidanceEnabled && !self.hasSpokenInitialInstructions {
@@ -406,13 +423,20 @@ class UnifiedCameraManager: NSObject, ObservableObject {
         // Cancel any existing pending TTS first
         cancelAllPendingTTS()
         
-        // Schedule cancellable Indonesian guidance with timing
-        scheduleTTS(delay: 1.0, message: "Selamat datang. Arahkan kamera pada kemasan.")
-        scheduleTTS(delay: 4.0, message: "Tahan kamera stabil sekitar 20 sentimeter dari kemasan.")
-        scheduleTTS(delay: 7.5, message: "Coba arahkan kamera ke beberapa sisi kemasan. Ketuk dua kali untuk fokus.")
+        // Schedule cancellable Indonesian guidance with timing for drug name phase
+        if ocrPhase == .drugName {
+            scheduleTTS(delay: 1.0, message: "Selamat datang. Arahkan kamera ke nama obat pada kemasan.")
+            scheduleTTS(delay: 4.0, message: "Tahan kamera stabil sekitar 20 sentimeter dari kemasan.")
+            scheduleTTS(delay: 7.5, message: "Cari area yang menampilkan nama obat. Ketuk dua kali untuk fokus.")
+        } else {
+            // Expiration date phase
+            scheduleTTS(delay: 1.0, message: "Sekarang arahkan kamera ke tanggal kadaluarsa.")
+            scheduleTTS(delay: 4.0, message: "Cari tulisan EXP, kadaluarsa, atau tanggal pada kemasan.")
+            scheduleTTS(delay: 7.5, message: "Tahan kamera stabil sekitar 15 sentimeter dari area tanggal.")
+        }
         
         hasSpokenInitialInstructions = true
-        print("🔊 Scheduled 3 cancellable Indonesian TTS guidance messages")
+        print("🔊 Scheduled 3 cancellable Indonesian TTS guidance messages for \(ocrPhase == .drugName ? "drug name" : "expiration date") phase")
     }
     
     func speakGuidance(_ message: String, priority: Bool = false) {
@@ -479,15 +503,25 @@ class UnifiedCameraManager: NSObject, ObservableObject {
         // Completely stop any current speech and cancel pending TTS
         stopSpeaking()
         
-        // Schedule cancellable detailed help guidance
-        scheduleTTS(delay: 0.5, message: "Panduan lengkap Expirade:")
-        scheduleTTS(delay: 3.0, message: "Pertama, pastikan kemasan obat dalam pencahayaan yang cukup.")
-        scheduleTTS(delay: 6.0, message: "Kedua, cari tulisan EXP, kadaluarsa, atau tanggal pada kemasan.")
-        scheduleTTS(delay: 9.0, message: "Ketiga, arahkan kamera tepat ke area tanggal tersebut.")
-        scheduleTTS(delay: 12.0, message: "Tahan kamera stabil sekitar 15 sentimeter dari kemasan.")
-        scheduleTTS(delay: 15.0, message: "Aplikasi akan memberikan getaran dan suara ketika tanggal terdeteksi.")
+        if ocrPhase == .drugName {
+            // Drug name phase guidance
+            scheduleTTS(delay: 0.5, message: "Panduan lengkap Expirade - Fase Nama Obat:")
+            scheduleTTS(delay: 3.0, message: "Pertama, pastikan kemasan obat dalam pencahayaan yang cukup.")
+            scheduleTTS(delay: 6.0, message: "Kedua, cari area yang menampilkan nama obat pada kemasan.")
+            scheduleTTS(delay: 9.0, message: "Ketiga, arahkan kamera tepat ke area nama obat tersebut.")
+            scheduleTTS(delay: 12.0, message: "Tahan kamera stabil sekitar 15 sentimeter dari kemasan.")
+            scheduleTTS(delay: 15.0, message: "Aplikasi akan menampilkan popup konfirmasi ketika nama obat terdeteksi.")
+        } else {
+            // Expiration date phase guidance
+            scheduleTTS(delay: 0.5, message: "Panduan lengkap Expirade - Fase Tanggal Kadaluarsa:")
+            scheduleTTS(delay: 3.0, message: "Pertama, pastikan kemasan obat dalam pencahayaan yang cukup.")
+            scheduleTTS(delay: 6.0, message: "Kedua, cari tulisan EXP, kadaluarsa, atau tanggal pada kemasan.")
+            scheduleTTS(delay: 9.0, message: "Ketiga, arahkan kamera tepat ke area tanggal tersebut.")
+            scheduleTTS(delay: 12.0, message: "Tahan kamera stabil sekitar 15 sentimeter dari kemasan.")
+            scheduleTTS(delay: 15.0, message: "Aplikasi akan memberikan getaran dan suara ketika tanggal terdeteksi.")
+        }
         
-        print("🔊 Scheduled 6 cancellable detailed help messages")
+        print("🔊 Scheduled 6 cancellable detailed help messages for \(ocrPhase == .drugName ? "drug name" : "expiration date") phase")
     }
     
     // MARK: - Comprehensive Real-World Expiration Date Parser
@@ -916,6 +950,48 @@ class UnifiedCameraManager: NSObject, ObservableObject {
         }
         return year
     }
+    
+    // MARK: - Drug Name Confirmation Handler
+    func userConfirmedDrugName(_ confirmed: Bool) {
+        if confirmed {
+            // User confirmed the drug name, move to expiration date phase
+            ocrPhase = .expirationDate
+            detectedDrugName = detectedDrugName // Keep the detected name
+            
+            DispatchQueue.main.async {
+                self.statusMessage = "📅 SCANNING EXPIRATION"
+                self.descriptionMessage = "Drug confirmed: \(self.detectedDrugName ?? "")\nNow scanning for expiration date"
+                self.accessibilityStatus = "Nama obat dikonfirmasi. Sekarang memindai tanggal kadaluarsa"
+                self.ocrStatus = "Looking for expiration date..."
+                self.positioningGuidance = "Point camera at expiration date area"
+            }
+            
+            // Resume OCR processing for expiration date detection
+            resumeCameraAndOCR()
+            
+            // Provide guidance for expiration date scanning
+            speakGuidance("Nama obat dikonfirmasi. Sekarang arahkan kamera ke area tanggal kadaluarsa", priority: true)
+            
+        } else {
+            // User rejected the drug name, continue scanning for drug names
+            detectedDrugName = nil
+            showDrugNameAlert = false
+            
+            DispatchQueue.main.async {
+                self.statusMessage = "💊 SCANNING DRUG NAME"
+                self.descriptionMessage = "Looking for drug name on package"
+                self.accessibilityStatus = "Memindai nama obat"
+                self.ocrStatus = "Looking for drug names..."
+                self.positioningGuidance = "Point camera at drug name area"
+            }
+            
+            // Resume OCR processing for drug name detection
+            resumeCameraAndOCR()
+            
+            // Provide guidance for drug name scanning
+            speakGuidance("Mencari nama obat lain", priority: true)
+        }
+    }
 }
 
 // MARK: - AVCaptureVideoDataOutputSampleBufferDelegate
@@ -949,67 +1025,64 @@ extension UnifiedCameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         }
     }
     
+    // --- OCR Pipeline Modification ---
     private func handleDetectedText(request: VNRequest, error: Error?) {
-        if let error = error {
-            print("❌ Text recognition error: \(error.localizedDescription)")
-            return
-        }
-        
-        guard let observations = request.results as? [VNRecognizedTextObservation] else {
-            return
-        }
-        
-        // Extract all detected text
-        let detectedText = observations.compactMap { observation in
-            return observation.topCandidates(1).first?.string
-        }
-        
-        // Only process if we have detected text
-        guard !detectedText.isEmpty else {
-            DispatchQueue.main.async {
-                self.ocrStatus = "Looking for text..."
-                self.positioningGuidance = "Move camera closer to text"
-                self.accessibilityStatus = "Tidak ada teks terdeteksi. Gerakkan lebih dekat."
-            }
-            return
-        }
-        
-        // Quick pre-filter: only process if text contains numbers
-        let hasNumbers = detectedText.contains { text in
-            text.rangeOfCharacter(from: .decimalDigits) != nil
-        }
-        
-        guard hasNumbers else {
-            DispatchQueue.main.async {
-                self.ocrStatus = "Looking for dates..."
-                self.positioningGuidance = "Move to find numbers or dates"
-                self.accessibilityStatus = "Teks ditemukan. Mencari tanggal kadaluarsa."
-                
-                // Provide occasional guidance when no numbers found
-                if self.ocrFrameCount % 50 == 0 {  // Every ~10 seconds
-                    self.speakGuidance("Arahkan ke area tanggal kadaluarsa.", priority: false)
-                    self.accessibilityStatus = "Tanggal tidak ditemukan. Coba sudut berbeda."
+        guard isOCRProcessingEnabled else { return }
+        guard let results = request.results as? [VNRecognizedTextObservation] else { return }
+        let detectedText = results.compactMap { $0.topCandidates(1).first?.string }
+        if detectedText.isEmpty { return }
+
+        // PHASE 1: Drug Name Detection
+        if ocrPhase == .drugName {
+            if let drugName = extractDrugName(from: detectedText) {
+                DispatchQueue.main.async {
+                    self.detectedDrugName = drugName
+                    self.showDrugNameAlert = true
                 }
+                pauseCameraAndOCR()
+                return
+            }
+            // Optionally: update accessibilityStatus for this phase
+            DispatchQueue.main.async {
+                self.accessibilityStatus = "Memindai nama obat..."
             }
             return
         }
-        
-        // Update OCR status
+        // PHASE 2: Expiration Date Detection (existing logic)
         DispatchQueue.main.async {
-            self.ocrStatus = "Found \(detectedText.count) text elements"
-            self.positioningGuidance = "Scanning for expiration dates..."
             self.accessibilityStatus = "Memindai teks untuk tanggal kadaluarsa..."
         }
-        
-        // Try to parse expiration date using inline fast parser
         if let parsedDate = parseExpirationDateFast(from: detectedText) {
             handleSuccessfulDateDetection(parsedDate, from: detectedText)
         } else {
-            // Provide positioning guidance based on detected text
             providePositioningGuidance(detectedText)
         }
-        
         lastDetectedText = detectedText
+    }
+    
+    private func extractDrugName(from texts: [String]) -> String? {
+        // Simple heuristic: first line that is not a date and not a keyword
+        let keywords = ["EXP", "EXPIRE", "BEST", "USE BY", "BB", "BBD", "ED", "E:", "B:", "KODE PRODUKSI", "BAIK DIGUNAKAN"]
+        for line in texts {
+            let upper = line.uppercased()
+            if keywords.contains(where: { upper.contains($0) }) { continue }
+            if upper.range(of: #"\d{1,2}[\/\.\-]\d{1,2}[\/\.\-]\d{2,4}"#, options: .regularExpression) != nil { continue }
+            if upper.range(of: #"\d{6,8}"#, options: .regularExpression) != nil { continue }
+            if line.trimmingCharacters(in: .whitespaces).count > 2 {
+                return line.trimmingCharacters(in: .whitespaces)
+            }
+        }
+        return nil
+    }
+    
+    private func pauseCameraAndOCR() {
+        isOCRProcessingEnabled = false
+        isDetectionInProgress = true
+    }
+    
+    private func resumeCameraAndOCR() {
+        isOCRProcessingEnabled = true
+        isDetectionInProgress = false
     }
     
     private func handleSuccessfulDateDetection(_ date: Date, from texts: [String]) {
@@ -1095,4 +1168,4 @@ extension UnifiedCameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
             }
         }
     }
-} 
+}

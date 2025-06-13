@@ -150,10 +150,29 @@ struct ExpirationDateView: View {
     }
 }
 
+struct DrugNameView: View {
+    let drugName: String
+    
+    var body: some View {
+        VStack(spacing: 4) {
+            Text("Nama Obat")
+                .font(.title3)
+                .accessibilityHidden(true)
+            
+            Text(drugName)
+                .font(.title2)
+                .bold()
+                .multilineTextAlignment(.center)
+                .accessibilityLabel("Nama obat: \(drugName)")
+        }
+    }
+}
+
 // MARK: - Main ResultView
 
 struct ResultView: View {
     let detectedDate: Date?
+    let detectedDrugName: String?
     @Environment(\.dismiss) private var dismiss
     @State private var speechSynthesizer = AVSpeechSynthesizer()
     @State private var hasSpoken = false
@@ -188,6 +207,13 @@ struct ResultView: View {
                 let status = getExpiredStatus(for: daysLeft)
                 
                 VStack(spacing: 40) {
+                    // Drug Name Component (if available)
+                    if let drugName = detectedDrugName {
+                        DrugNameView(drugName: drugName)
+                            .foregroundColor(.black)
+                            .padding(.bottom, 20)
+                    }
+                    
                     // Status Circle Component
                     StatusCircleView(status: status)
                         .frame(width: 200, height: 200)
@@ -312,17 +338,20 @@ struct ResultView: View {
         // Create speech message based on status
         var message: String
         
+        // Add drug name to the beginning if available
+        let drugPrefix = detectedDrugName != nil ? "Obat \(detectedDrugName!). " : "Obat. "
+        
         if daysLeft < 0 {
             let daysPast = abs(daysLeft)
-            message = "\(status.message). Obat sudah kadaluarsa \(angkaKeTeks(daysPast)) hari yang lalu. Tanggal kadaluarsa \(spokenDate). Jangan gunakan obat ini."
+            message = "\(drugPrefix)\(status.message). Obat sudah kadaluarsa \(angkaKeTeks(daysPast)) hari yang lalu. Tanggal kadaluarsa \(spokenDate). Jangan gunakan obat ini."
         } else if daysLeft == 0 {
-            message = "\(status.message). Obat kadaluarsa hari ini, tanggal \(spokenDate). Sebaiknya jangan digunakan."
+            message = "\(drugPrefix)\(status.message). Obat kadaluarsa hari ini, tanggal \(spokenDate). Sebaiknya jangan digunakan."
         } else if daysLeft <= 4 {
-            message = "\(status.message). Obat akan kadaluarsa dalam \(angkaKeTeks(daysLeft)) hari lagi. Tanggal kadaluarsa \(spokenDate). Segera gunakan."
+            message = "\(drugPrefix)\(status.message). Obat akan kadaluarsa dalam \(angkaKeTeks(daysLeft)) hari lagi. Tanggal kadaluarsa \(spokenDate). Segera gunakan."
         } else if daysLeft <= 14 {
-            message = "\(status.message). Obat akan kadaluarsa dalam \(angkaKeTeks(daysLeft)) hari lagi. Tanggal kadaluarsa \(spokenDate)."
+            message = "\(drugPrefix)\(status.message). Obat akan kadaluarsa dalam \(angkaKeTeks(daysLeft)) hari lagi. Tanggal kadaluarsa \(spokenDate)."
         } else {
-            message = "\(status.message). Obat masih aman digunakan. Akan kadaluarsa dalam \(angkaKeTeks(daysLeft)) hari lagi, tanggal \(spokenDate)."
+            message = "\(drugPrefix)\(status.message). Obat masih aman digunakan. Akan kadaluarsa dalam \(angkaKeTeks(daysLeft)) hari lagi, tanggal \(spokenDate)."
         }
         
         // Configure and speak
@@ -354,27 +383,27 @@ struct ResultView_Previews: PreviewProvider {
     static var previews: some View {
         Group {
             // Safe (Green) - More than 14 days
-            ResultView(detectedDate: Calendar.current.date(byAdding: .day, value: 30, to: Date()))
+            ResultView(detectedDate: Calendar.current.date(byAdding: .day, value: 30, to: Date()), detectedDrugName: nil)
                 .previewDisplayName("Safe - 30 days")
             
             // Soon (Yellow) - 5-14 days  
-            ResultView(detectedDate: Calendar.current.date(byAdding: .day, value: 10, to: Date()))
+            ResultView(detectedDate: Calendar.current.date(byAdding: .day, value: 10, to: Date()), detectedDrugName: nil)
                 .previewDisplayName("Soon - 10 days")
             
             // Danger (Red) - 1-4 days
-            ResultView(detectedDate: Calendar.current.date(byAdding: .day, value: 2, to: Date()))
+            ResultView(detectedDate: Calendar.current.date(byAdding: .day, value: 2, to: Date()), detectedDrugName: nil)
                 .previewDisplayName("Danger - 2 days")
             
             // Expired (Gray) - Past expiration
-            ResultView(detectedDate: Calendar.current.date(byAdding: .day, value: -5, to: Date()))
+            ResultView(detectedDate: Calendar.current.date(byAdding: .day, value: -5, to: Date()), detectedDrugName: nil)
                 .previewDisplayName("Expired - 5 days ago")
             
             // Danger (Red) - Expires today
-            ResultView(detectedDate: Date())
+            ResultView(detectedDate: Date(), detectedDrugName: nil)
                 .previewDisplayName("Danger - Today")
             
             // No date
-            ResultView(detectedDate: nil)
+            ResultView(detectedDate: nil, detectedDrugName: nil)
                 .previewDisplayName("No Date")
         }
     }

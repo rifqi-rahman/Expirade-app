@@ -37,9 +37,14 @@ struct ContentView: View {
                         
                         // Help button
                         Button(action: {
-                            // Quick help action - speak basic guidance
+                            // Quick help action - speak basic guidance based on current phase
                             cameraManager.stopSpeaking()
-                            let helpMessage = "Arahkan kamera ke tanggal kadaluarsa pada kemasan obat. Tahan stabil sekitar 15 sentimeter. Pastikan pencahayaan cukup."
+                            let helpMessage: String
+                            if cameraManager.ocrPhase == .drugName {
+                                helpMessage = "Arahkan kamera ke nama obat pada kemasan. Tahan stabil sekitar 15 sentimeter. Pastikan pencahayaan cukup."
+                            } else {
+                                helpMessage = "Arahkan kamera ke tanggal kadaluarsa pada kemasan. Tahan stabil sekitar 15 sentimeter. Pastikan pencahayaan cukup."
+                            }
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                                 cameraManager.speakGuidance(helpMessage, priority: true)
                             }
@@ -76,7 +81,7 @@ struct ContentView: View {
                                     cameraManager.speakGuidance("Memfokuskan kamera", priority: false)
                                 }
                                 .accessibilityLabel("Jendela bidik kamera")
-                                .accessibilityHint("Ketuk dua kali untuk membantu kamera fokus pada tanggal kadaluarsa")
+                                .accessibilityHint(cameraManager.ocrPhase == .drugName ? "Ketuk dua kali untuk membantu kamera fokus pada nama obat" : "Ketuk dua kali untuk membantu kamera fokus pada tanggal kadaluarsa")
                             
                             // Overlay UI elements
                             VStack {
@@ -104,7 +109,7 @@ struct ContentView: View {
                                         Circle()
                                             .fill(Color.green)
                                             .frame(width: 8, height: 8)
-                                        Text("OCR")
+                                        Text(cameraManager.ocrPhase == .drugName ? "DRUG" : "DATE")
                                             .foregroundColor(.white)
                                             .fontWeight(.bold)
                                             .font(.caption)
@@ -113,8 +118,8 @@ struct ContentView: View {
                                     .padding(.vertical, 6)
                                     .background(Color.black.opacity(0.8))
                                     .cornerRadius(20)
-                                    .accessibilityLabel("Pemindai teks aktif")
-                                    .accessibilityHint("Indikator bahwa sistem pembaca teks sedang berjalan")
+                                    .accessibilityLabel(cameraManager.ocrPhase == .drugName ? "Pemindai nama obat aktif" : "Pemindai tanggal aktif")
+                                    .accessibilityHint(cameraManager.ocrPhase == .drugName ? "Indikator bahwa sistem sedang mencari nama obat" : "Indikator bahwa sistem sedang mencari tanggal kadaluarsa")
                                 }
                                 .padding(.top, 16)
                                 .padding(.horizontal, 16)
@@ -137,7 +142,7 @@ struct ContentView: View {
                                 }
                             )
                             .accessibilityLabel("Memuat kamera")
-                            .accessibilityHint("Kamera sedang mempersiapkan diri untuk memindai tanggal kadaluarsa")
+                            .accessibilityHint(cameraManager.ocrPhase == .drugName ? "Kamera sedang mempersiapkan diri untuk memindai nama obat" : "Kamera sedang mempersiapkan diri untuk memindai tanggal kadaluarsa")
                     }
                     
                     // Clean accessibility status for VoiceOver users
@@ -161,24 +166,24 @@ struct ContentView: View {
                         Spacer().frame(height: 40)
                         
                         // Tap to focus hint (VoiceOver friendly)
-                        Text("Ketuk tengah layar untuk membantu fokus kamera")
+                        Text(cameraManager.ocrPhase == .drugName ? "Ketuk tengah layar untuk membantu fokus kamera pada nama obat" : "Ketuk tengah layar untuk membantu fokus kamera pada tanggal kadaluarsa")
                             .foregroundColor(.white.opacity(0.8))
                             .font(.body)
                                 .multilineTextAlignment(.center)
                                 .shadow(color: .black, radius: 1)
-                            .accessibilityLabel("Ketuk tengah layar untuk membantu kamera fokus pada tanggal kadaluarsa")
+                            .accessibilityLabel(cameraManager.ocrPhase == .drugName ? "Ketuk tengah layar untuk membantu kamera fokus pada nama obat" : "Ketuk tengah layar untuk membantu kamera fokus pada tanggal kadaluarsa")
                             .accessibilityHint("Ketuk dua kali untuk mengaktifkan fokus kamera")
                         
                         Spacer().frame(height: 30)
                     }
                 }
             }
-            .background(Color.white)
-            .navigationTitle("Kamera")
+            .background(Color.primary)
+            .navigationTitle("Memindai")
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarBackButtonHidden(true)
             .navigationDestination(isPresented: $cameraManager.shouldNavigateToResult) {
-                ResultView(detectedDate: cameraManager.detectedDate)
+                ResultView(detectedDate: cameraManager.detectedDate, detectedDrugName: cameraManager.detectedDrugName)
             }
             .onChange(of: cameraManager.shouldNavigateToResult) { oldValue, newValue in
                 // When navigating TO ResultView (newValue becomes true)
@@ -198,6 +203,18 @@ struct ContentView: View {
             .onDisappear {
                 cameraManager.stopSession()
                 cameraManager.stopSpeaking()
+            }
+            .alert(isPresented: $cameraManager.showDrugNameAlert) {
+                Alert(
+                    title: Text("Terdeteksi Nama Obat"),
+                    message: Text("Apakah ini obat yang anda pilih?\n\n\(cameraManager.detectedDrugName ?? "")"),
+                    primaryButton: .destructive(Text("Tidak")) {
+                        cameraManager.userConfirmedDrugName(false)
+                    },
+                    secondaryButton: .default(Text("Ya")) {
+                        cameraManager.userConfirmedDrugName(true)
+                    }
+                )
             }
         }
     }
