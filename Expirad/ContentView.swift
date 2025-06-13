@@ -45,8 +45,11 @@ struct ContentView: View {
                             } else {
                                 helpMessage = "Arahkan kamera ke tanggal kadaluarsa pada kemasan. Tahan stabil sekitar 15 sentimeter. Pastikan pencahayaan cukup."
                             }
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                                cameraManager.speakGuidance(helpMessage, priority: true)
+                            // Only speak if VoiceOver is not running
+                            if !UIAccessibility.isVoiceOverRunning {
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                    cameraManager.speakGuidance(helpMessage, priority: true)
+                                }
                             }
                         }) {
                             Image(systemName: "questionmark.circle.fill")
@@ -59,7 +62,7 @@ struct ContentView: View {
                         .accessibilityLabel("Tombol bantuan")
                         .accessibilityHint("Ketuk dua kali untuk instruksi singkat, atau tahan lama untuk panduan lengkap")
                         .onLongPressGesture {
-                            // Detailed help on long press
+                            // Detailed help on long press (VoiceOver-aware)
                             cameraManager.speakDetailedHelp()
                         }
                     }
@@ -77,8 +80,10 @@ struct ContentView: View {
                             CameraPreview(previewLayer: previewLayer)
                                 .id(cameraManager.previewRefreshID) // Force refresh when ID changes
                                 .onTapGesture {
-                                    // Help camera focus when user taps screen
-                                    cameraManager.speakGuidance("Memfokuskan kamera", priority: false)
+                                    // Help camera focus when user taps screen (VoiceOver-aware)
+                                    if !UIAccessibility.isVoiceOverRunning {
+                                        cameraManager.speakGuidance("Memfokuskan kamera", priority: false)
+                                    }
                                 }
                                 .accessibilityLabel("Jendela bidik kamera")
                                 .accessibilityHint(cameraManager.ocrPhase == .drugName ? "Ketuk dua kali untuk membantu kamera fokus pada nama obat" : "Ketuk dua kali untuk membantu kamera fokus pada tanggal kadaluarsa")
@@ -206,15 +211,24 @@ struct ContentView: View {
             }
             .alert(isPresented: $cameraManager.showDrugNameAlert) {
                 Alert(
-                    title: Text("Terdeteksi Nama Obat"),
-                    message: Text("Apakah ini obat yang anda pilih?\n\n\(cameraManager.detectedDrugName ?? "")"),
-                    primaryButton: .destructive(Text("Tidak")) {
+                    title: Text("terdeteksi :\n\(cameraManager.detectedDrugName ?? "")\n\nGeser 1 jari ke kanan untuk konfirmasi"),
+                    primaryButton: .destructive(Text("Salah")) {
                         cameraManager.userConfirmedDrugName(false)
                     },
-                    secondaryButton: .default(Text("Ya")) {
+                    secondaryButton: .default(Text("Benar")) {
                         cameraManager.userConfirmedDrugName(true)
                     }
                 )
+            }
+            .onChange(of: cameraManager.showDrugNameAlert) { oldValue, newValue in
+                // Alert state changed
+                if newValue {
+                    // Alert is showing - TTS is already stopped in handleDetectedText
+                    print("🔔 Alert appeared - TTS should be stopped")
+                } else {
+                    // Alert is dismissed - handled in userConfirmedDrugName
+                    print("🔔 Alert dismissed")
+                }
             }
         }
     }

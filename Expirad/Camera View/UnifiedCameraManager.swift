@@ -105,6 +105,37 @@ class UnifiedCameraManager: NSObject, ObservableObject {
     private var lastGuidanceTime: Date = Date()
     private var lastDetectedText: [String] = []
     
+    // MARK: - VoiceOver-Aware TTS Management
+    private var isAlertActive = false // Track when alerts are shown
+    private var shouldResumeTTSAfterAlert = false // Resume TTS after alert dismisses
+    
+    // MARK: - VoiceOver Detection
+    private var isVoiceOverRunning: Bool {
+        UIAccessibility.isVoiceOverRunning
+    }
+    
+    // MARK: - VoiceOver Status Change Observer
+    private func setupVoiceOverObserver() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(voiceOverStatusChanged),
+            name: UIAccessibility.voiceOverStatusDidChangeNotification,
+            object: nil
+        )
+    }
+    
+    @objc private func voiceOverStatusChanged() {
+        let isNowRunning = UIAccessibility.isVoiceOverRunning
+        print("🔇 VoiceOver status changed: \(isNowRunning ? "ON" : "OFF")")
+        
+        if isNowRunning {
+            // VoiceOver just turned on - stop all TTS immediately
+            stopSpeaking()
+            cancelAllPendingTTS()
+            print("🔇 TTS stopped and cancelled due to VoiceOver activation")
+        }
+    }
+    
     // MARK: - Cancellable TTS Management
     private var pendingTTSWorkItems: [DispatchWorkItem] = []
     
@@ -134,6 +165,11 @@ class UnifiedCameraManager: NSObject, ObservableObject {
         super.init()
         setupHapticEngine()
         updateUIForMode()
+        setupVoiceOverObserver()
+    }
+    
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
     
     private func updateUIForMode() {
@@ -144,7 +180,7 @@ class UnifiedCameraManager: NSObject, ObservableObject {
             isCameraActive = false
             
             // Provide TTS feedback even in preview
-            if isVoiceGuidanceEnabled {
+            if isVoiceGuidanceEnabled && !isVoiceOverRunning {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                     self.speakGuidance("Mode pratinjau aktif. Bangun dan jalankan aplikasi di perangkat asli untuk menggunakan kamera dan fitur OCR.", priority: true)
                 }
@@ -208,7 +244,10 @@ class UnifiedCameraManager: NSObject, ObservableObject {
                 self.descriptionMessage = "Go to Settings > Expirad > Camera"
                 self.debugInfo = "Camera permission denied"
                 self.isCameraActive = false
-                self.speakGuidance("Izin kamera ditolak. Silakan buka Pengaturan, lalu Expirad, lalu Kamera, dan aktifkan akses kamera.", priority: true)
+                // Only speak if VoiceOver is not running
+                if !self.isVoiceOverRunning {
+                    self.speakGuidance("Izin kamera ditolak. Silakan buka Pengaturan, lalu Expirad, lalu Kamera, dan aktifkan akses kamera.", priority: true)
+                }
             }
         case .restricted:
             DispatchQueue.main.async {
@@ -358,7 +397,10 @@ class UnifiedCameraManager: NSObject, ObservableObject {
                     self.statusMessage = "❌ CAMERA FAILED"
                     self.descriptionMessage = "Camera failed to start"
                     self.debugInfo = "Session failed to start"
-                    self.speakGuidance("Kamera gagal dimulai. Silakan mulai ulang aplikasi.", priority: true)
+                    // Only speak if VoiceOver is not running
+                    if !self.isVoiceOverRunning {
+                        self.speakGuidance("Kamera gagal dimulai. Silakan mulai ulang aplikasi.", priority: true)
+                    }
                 }
             }
             
@@ -400,14 +442,20 @@ class UnifiedCameraManager: NSObject, ObservableObject {
                     self.isFlashlightOn = true
                 }
                 print("💡 Flashlight ON")
-                speakGuidance("Senter dinyalakan")
+                // Only speak if VoiceOver is not running
+                if !self.isVoiceOverRunning {
+                    speakGuidance("Senter dinyalakan")
+                }
             } else {
                 device.torchMode = .off
                 DispatchQueue.main.async {
                     self.isFlashlightOn = false
                 }
                 print("💡 Flashlight OFF")
-                speakGuidance("Senter dimatikan")
+                // Only speak if VoiceOver is not running
+                if !self.isVoiceOverRunning {
+                    speakGuidance("Senter dimatikan")
+                }
             }
             
             device.unlockForConfiguration()
@@ -418,6 +466,12 @@ class UnifiedCameraManager: NSObject, ObservableObject {
     
     // MARK: - Comprehensive Indonesian Voice Guidance for Blind Users
     private func speakInitialInstructions() {
+        // Don't provide TTS instructions if VoiceOver is running
+        guard !isVoiceOverRunning else {
+            print("🔇 VoiceOver is running - skipping initial instructions")
+            return
+        }
+        
         guard isVoiceGuidanceEnabled else { return }
         
         // Cancel any existing pending TTS first
@@ -440,6 +494,19 @@ class UnifiedCameraManager: NSObject, ObservableObject {
     }
     
     func speakGuidance(_ message: String, priority: Bool = false) {
+        // Don't speak if VoiceOver is running (let VoiceOver handle accessibility)
+        guard !isVoiceOverRunning else {
+            print("🔇 VoiceOver is running - skipping TTS: \(message)")
+            return
+        }
+        
+        // Don't speak if alert is active
+        guard !isAlertActive else {
+            print("🔇 Alert is active - skipping TTS: \(message)")
+            shouldResumeTTSAfterAlert = true
+            return
+        }
+        
         guard isVoiceGuidanceEnabled else { 
             print("🔇 Voice guidance disabled")
             return 
@@ -454,6 +521,12 @@ class UnifiedCameraManager: NSObject, ObservableObject {
         lastGuidanceTime = now
         
         print("🔊 Speaking (Indonesian): \(message)")
+        
+        // Final check - don't speak if VoiceOver is running (race condition protection)
+        guard !UIAccessibility.isVoiceOverRunning else {
+            print("🔇 VoiceOver detected during speech - cancelling")
+            return
+        }
         
         // Stop any current speech before starting new one
         if speechSynthesizer.isSpeaking {
@@ -488,6 +561,12 @@ class UnifiedCameraManager: NSObject, ObservableObject {
     }
     
     private func scheduleTTS(delay: Double, message: String, priority: Bool = true) {
+        // Don't schedule TTS if VoiceOver is running
+        guard !isVoiceOverRunning else {
+            print("🔇 VoiceOver is running - skipping scheduled TTS: \(message)")
+            return
+        }
+        
         let workItem = DispatchWorkItem { [weak self] in
             self?.speakGuidance(message, priority: priority)
         }
@@ -498,6 +577,12 @@ class UnifiedCameraManager: NSObject, ObservableObject {
     
     // MARK: - Additional Indonesian Help Functions
     func speakDetailedHelp() {
+        // Don't provide detailed help if VoiceOver is running
+        guard !isVoiceOverRunning else {
+            print("🔇 VoiceOver is running - skipping detailed help")
+            return
+        }
+        
         guard isVoiceGuidanceEnabled else { return }
         
         // Completely stop any current speech and cancel pending TTS
@@ -953,6 +1038,9 @@ class UnifiedCameraManager: NSObject, ObservableObject {
     
     // MARK: - Drug Name Confirmation Handler
     func userConfirmedDrugName(_ confirmed: Bool) {
+        // Alert is being dismissed
+        setAlertActive(false)
+        
         if confirmed {
             // User confirmed the drug name, move to expiration date phase
             ocrPhase = .expirationDate
@@ -969,8 +1057,10 @@ class UnifiedCameraManager: NSObject, ObservableObject {
             // Resume OCR processing for expiration date detection
             resumeCameraAndOCR()
             
-            // Provide guidance for expiration date scanning
-            speakGuidance("Nama obat dikonfirmasi. Sekarang arahkan kamera ke area tanggal kadaluarsa", priority: true)
+            // Provide guidance for expiration date scanning (VoiceOver-aware)
+            if !isVoiceOverRunning {
+                speakGuidance("Nama obat dikonfirmasi. Sekarang arahkan kamera ke area tanggal kadaluarsa", priority: true)
+            }
             
         } else {
             // User rejected the drug name, continue scanning for drug names
@@ -988,8 +1078,10 @@ class UnifiedCameraManager: NSObject, ObservableObject {
             // Resume OCR processing for drug name detection
             resumeCameraAndOCR()
             
-            // Provide guidance for drug name scanning
-            speakGuidance("Mencari nama obat lain", priority: true)
+            // Provide guidance for drug name scanning (VoiceOver-aware)
+            if !isVoiceOverRunning {
+                speakGuidance("Mencari nama obat lain", priority: true)
+            }
         }
     }
 }
@@ -1034,13 +1126,19 @@ extension UnifiedCameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
 
         // PHASE 1: Drug Name Detection
         if ocrPhase == .drugName {
+            print("🔍 Drug name phase - detected text: \(detectedText)")
             if let drugName = extractDrugName(from: detectedText) {
+                print("✅ Drug name extracted: '\(drugName)'")
                 DispatchQueue.main.async {
                     self.detectedDrugName = drugName
                     self.showDrugNameAlert = true
+                    // Set alert as active to stop TTS
+                    self.setAlertActive(true)
                 }
                 pauseCameraAndOCR()
                 return
+            } else {
+                print("❌ No valid drug name found in detected text")
             }
             // Optionally: update accessibilityStatus for this phase
             DispatchQueue.main.async {
@@ -1050,7 +1148,7 @@ extension UnifiedCameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         }
         // PHASE 2: Expiration Date Detection (existing logic)
         DispatchQueue.main.async {
-            self.accessibilityStatus = "Memindai teks untuk tanggal kadaluarsa..."
+            self.accessibilityStatus = "Memindai tanggal kadaluarsa..."
         }
         if let parsedDate = parseExpirationDateFast(from: detectedText) {
             handleSuccessfulDateDetection(parsedDate, from: detectedText)
@@ -1061,17 +1159,95 @@ extension UnifiedCameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
     }
     
     private func extractDrugName(from texts: [String]) -> String? {
-        // Simple heuristic: first line that is not a date and not a keyword
-        let keywords = ["EXP", "EXPIRE", "BEST", "USE BY", "BB", "BBD", "ED", "E:", "B:", "KODE PRODUKSI", "BAIK DIGUNAKAN"]
+        // Enhanced drug name extraction - only text, no numbers
+        let keywords = ["EXP", "EXPIRE", "BEST", "USE BY", "BB", "BBD", "ED", "E:", "B:", "KODE PRODUKSI", "BAIK DIGUNAKAN", "BATCH", "LOT", "MFG", "MANUFACTURED", "PRODUCED"]
+        
         for line in texts {
-            let upper = line.uppercased()
+            let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            
+            // Skip empty or very short lines
+            guard trimmedLine.count >= 3 else { continue }
+            
+            let upper = trimmedLine.uppercased()
+            
+            // Skip if contains expiration keywords
             if keywords.contains(where: { upper.contains($0) }) { continue }
+            
+            // Skip if it's primarily numbers (more than 50% digits)
+            let digitCount = trimmedLine.filter { $0.isNumber }.count
+            let totalCount = trimmedLine.count
+            if totalCount > 0 && Double(digitCount) / Double(totalCount) > 0.5 {
+                continue
+            }
+            
+            // Skip if it's a date pattern
             if upper.range(of: #"\d{1,2}[\/\.\-]\d{1,2}[\/\.\-]\d{2,4}"#, options: .regularExpression) != nil { continue }
             if upper.range(of: #"\d{6,8}"#, options: .regularExpression) != nil { continue }
-            if line.trimmingCharacters(in: .whitespaces).count > 2 {
-                return line.trimmingCharacters(in: .whitespaces)
+            if upper.range(of: #"\d{4}"#, options: .regularExpression) != nil && upper.count <= 6 { continue }
+            
+            // Skip if it's just numbers and common separators
+            let cleanText = trimmedLine.replacingOccurrences(of: " ", with: "")
+                .replacingOccurrences(of: "-", with: "")
+                .replacingOccurrences(of: ".", with: "")
+                .replacingOccurrences(of: "/", with: "")
+            if cleanText.allSatisfy({ $0.isNumber }) { continue }
+            
+            // Skip if it's too short after cleaning
+            let cleanedLine = trimmedLine.filter { !$0.isNumber && !$0.isPunctuation }
+            guard cleanedLine.count >= 2 else { continue }
+            
+            // Skip if it's just common packaging text
+            let packagingText = ["MG", "ML", "GRAM", "TABLET", "CAPSULE", "SYRUP", "DROPS", "INJECTION", "CREAM", "GEL", "OINTMENT", "POWDER", "SUSPENSION", "SOLUTION", "TABLET", "KAPSUL", "SIRUP", "TETES", "INJEKSI", "KRIM", "SALEP", "BUBUK", "SUSPENSI", "LARUTAN"]
+            if packagingText.contains(where: { upper.contains($0) }) && upper.count <= 15 { continue }
+            
+            // Skip if it's just dosage information
+            if upper.range(of: #"\d+\s*MG"#, options: .regularExpression) != nil { continue }
+            if upper.range(of: #"\d+\s*ML"#, options: .regularExpression) != nil { continue }
+            if upper.range(of: #"\d+\s*GRAM"#, options: .regularExpression) != nil { continue }
+            if upper.range(of: #"\d+\s*MG/ML"#, options: .regularExpression) != nil { continue }
+            if upper.range(of: #"\d+\s*MG/GRAM"#, options: .regularExpression) != nil { continue }
+            
+            // Skip if it's just a batch/lot number
+            if upper.range(of: #"BATCH\s*#?\s*\d+"#, options: .regularExpression) != nil { continue }
+            if upper.range(of: #"LOT\s*#?\s*\d+"#, options: .regularExpression) != nil { continue }
+            if upper.range(of: #"NO\s*BATCH\s*#?\s*\d+"#, options: .regularExpression) != nil { continue }
+            if upper.range(of: #"NO\s*LOT\s*#?\s*\d+"#, options: .regularExpression) != nil { continue }
+            
+            // Skip if it's just a registration number
+            if upper.range(of: #"REG\s*#?\s*\d+"#, options: .regularExpression) != nil { continue }
+            if upper.range(of: #"NAFDAC\s*#?\s*\d+"#, options: .regularExpression) != nil { continue }
+            if upper.range(of: #"BPOM\s*#?\s*\d+"#, options: .regularExpression) != nil { continue }
+            if upper.range(of: #"POM\s*#?\s*\d+"#, options: .regularExpression) != nil { continue }
+            
+            // Skip if it's just a barcode or serial number
+            if upper.range(of: #"\d{10,}"#, options: .regularExpression) != nil { continue }
+            
+            // Handle drug names that might contain numbers (like "Paracetamol 500mg")
+            // If the text contains numbers but also has significant text content, it might be a drug name
+            let textOnly = trimmedLine.filter { !$0.isNumber && !$0.isPunctuation && !$0.isWhitespace }
+            let numberOnly = trimmedLine.filter { $0.isNumber }
+            
+            // If it has both text and numbers, and text is longer than numbers, it's likely a drug name
+            if textOnly.count > numberOnly.count && textOnly.count >= 3 {
+                // This is likely a drug name with dosage (e.g., "Paracetamol 500mg")
+                let finalText = trimmedLine
+                    .replacingOccurrences(of: "  ", with: " ") // Remove double spaces
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                
+                print("💊 Drug name with dosage found: '\(finalText)'")
+                return finalText
             }
+            
+            // If we get here, it's likely a drug name
+            // Clean up the text for better presentation
+            let finalText = trimmedLine
+                .replacingOccurrences(of: "  ", with: " ") // Remove double spaces
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            
+            print("💊 Potential drug name found: '\(finalText)'")
+            return finalText
         }
+        
         return nil
     }
     
@@ -1126,8 +1302,10 @@ extension UnifiedCameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
             // CRITICAL: Stop any current TTS to prevent conflict with ResultView
             stopSpeaking()
             
-            // Announce the found date with shorter message to prevent overlap
-            speakGuidance("Tanggal terdeteksi", priority: true)
+            // Announce the found date with shorter message to prevent overlap (VoiceOver-aware)
+            if !isVoiceOverRunning {
+                speakGuidance("Tanggal terdeteksi", priority: true)
+            }
             
             print("✅ Date detected instantly: \(date) - Detection locked")
             
@@ -1150,22 +1328,63 @@ extension UnifiedCameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         
         DispatchQueue.main.async {
             if allText.contains("EXP") || allText.contains("EXPIRE") || allText.contains("BEST") || allText.contains("USE BY") {
-                self.positioningGuidance = "Expiration area found! Hold steady..."
-                self.speakGuidance("Mencari area kadaluarsa, tahan stabil.", priority: false)
+                self.positioningGuidance = "Tanggal Kadaluarsa ditemukan! tahan stabil..."
+                // Only speak if VoiceOver is not running
+                if !self.isVoiceOverRunning {
+                    self.speakGuidance("Mencari area kadaluarsa, tahan stabil.", priority: false)
+                }
             } else if allText.contains(where: { $0.isNumber }) {
                 // Has numbers but no keywords
-                self.positioningGuidance = "Found numbers, looking for dates..."
-                self.speakGuidance("Memindai angka untuk tanggal.", priority: false)
+                self.positioningGuidance = "Menemukan angka, mencari tanggal..."
+                // Only speak if VoiceOver is not running
+                if !self.isVoiceOverRunning {
+                    self.speakGuidance("Memindai tanggal.", priority: false)
+                }
             } else if allText.count > 100 {
-                self.positioningGuidance = "Too much text. Focus on expiration area"
-                self.speakGuidance("Pindah ke area kadaluarsa.", priority: false)
+                self.positioningGuidance = "Terlalu banyak teks. Fokus ke tanggal kadaluarsa"
+                // Only speak if VoiceOver is not running
+                if !self.isVoiceOverRunning {
+                    self.speakGuidance("Pindah ke area kadaluarsa.", priority: false)
+                }
             } else if allText.count < 10 {
-                self.positioningGuidance = "Move closer to see more text"
-                self.speakGuidance("Gerakkan lebih dekat.", priority: false)
+                self.positioningGuidance = "Arahkan lebih dekat"
+                // Only speak if VoiceOver is not running
+                if !self.isVoiceOverRunning {
+                    self.speakGuidance("Gerakkan lebih dekat.", priority: false)
+                }
             } else {
-                self.positioningGuidance = "Scanning for expiration dates..."
+                self.positioningGuidance = "Memindai tanggal kadaluarsa..."
                 // Don't speak this one to avoid too much chatter
             }
+        }
+    }
+}
+
+// MARK: - Alert State Management
+extension UnifiedCameraManager {
+    func setAlertActive(_ active: Bool) {
+        isAlertActive = active
+        if active {
+            // Alert is showing - stop all TTS immediately
+            stopSpeaking()
+            print("🔇 TTS stopped due to alert appearance")
+        } else {
+            // Alert dismissed - resume TTS if needed
+            if shouldResumeTTSAfterAlert {
+                shouldResumeTTSAfterAlert = false
+                // Small delay to let VoiceOver finish announcing the alert dismissal
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    self.resumeTTSAfterAlert()
+                }
+            }
+        }
+    }
+    
+    private func resumeTTSAfterAlert() {
+        // Only resume if VoiceOver is not running
+        if !isVoiceOverRunning {
+            // For non-VoiceOver users, provide brief guidance about what happened
+            speakGuidance("Kembali ke pemindaian", priority: true)
         }
     }
 }
