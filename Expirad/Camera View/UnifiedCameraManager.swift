@@ -34,6 +34,15 @@ class UnifiedCameraManager: NSObject, ObservableObject {
     @Published var previewRefreshID = UUID() // Force SwiftUI to refresh preview layer
     @Published var accessibilityStatus = "Scanning..." // Simple status for VoiceOver users
     
+    // --- Drug Name Detection Phase ---
+    enum OCRPhase {
+        case drugName
+        case expirationDate
+    }
+    
+    @Published var ocrPhase: OCRPhase = .drugName
+    @Published var detectedDrugName: String? = nil
+    
     // MARK: - Camera Control Methods
     func resetForNewScan() {
         detectedDate = nil
@@ -41,6 +50,10 @@ class UnifiedCameraManager: NSObject, ObservableObject {
         detectionConfidenceCount = 0
         lastDetectedDate = nil
         hasSpokenInitialInstructions = false // Allow TTS guidance again
+        
+        // Reset to drug name phase
+        ocrPhase = .drugName
+        detectedDrugName = nil
         
         // IMPORTANT: Stop any lingering TTS and cancel pending delayed calls from previous session
         stopSpeaking()
@@ -54,13 +67,13 @@ class UnifiedCameraManager: NSObject, ObservableObject {
         
         // Update UI - camera session should still be running
         DispatchQueue.main.async {
-            self.statusMessage = "📷 CAMERA ACTIVE"
-            self.descriptionMessage = "OCR Processing Running\nPoint at expiration date"
+            self.statusMessage = "💊 SCANNING DRUG NAME"
+            self.descriptionMessage = "OCR Processing Running\nPoint at drug name first"
             self.debugInfo = "Camera running, OCR active"
             self.isCameraActive = true
-            self.positioningGuidance = "Ready! Point camera at medicine package"
-            self.ocrStatus = "Looking for dates..."
-            self.accessibilityStatus = "Siap memindai kemasan baru"
+            self.positioningGuidance = "Ready! Point camera at drug name"
+            self.ocrStatus = "Looking for drug names..."
+            self.accessibilityStatus = "Siap memindai nama obat"
             
             // Restart TTS guidance for new scan
             if self.isVoiceGuidanceEnabled {
@@ -68,7 +81,7 @@ class UnifiedCameraManager: NSObject, ObservableObject {
             }
         }
         
-        print("✅ OCR processing re-enabled for new scan")
+        print("✅ OCR processing re-enabled for new scan - Drug Name Phase")
     }
     
     // MARK: - Private Properties
@@ -89,6 +102,37 @@ class UnifiedCameraManager: NSObject, ObservableObject {
     private var hasSpokenInitialInstructions = false
     private var lastGuidanceTime: Date = Date()
     private var lastDetectedText: [String] = []
+    
+    // MARK: - VoiceOver-Aware TTS Management
+    private var isAlertActive = false // Track when alerts are shown
+    private var shouldResumeTTSAfterAlert = false // Resume TTS after alert dismisses
+    
+    // MARK: - VoiceOver Detection
+    private var isVoiceOverRunning: Bool {
+        UIAccessibility.isVoiceOverRunning
+    }
+    
+    // MARK: - VoiceOver Status Change Observer
+    private func setupVoiceOverObserver() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(voiceOverStatusChanged),
+            name: UIAccessibility.voiceOverStatusDidChangeNotification,
+            object: nil
+        )
+    }
+    
+    @objc private func voiceOverStatusChanged() {
+        let isNowRunning = UIAccessibility.isVoiceOverRunning
+        print("🔇 VoiceOver status changed: \(isNowRunning ? "ON" : "OFF")")
+        
+        if isNowRunning {
+            // VoiceOver just turned on - stop all TTS immediately
+            stopSpeaking()
+            cancelAllPendingTTS()
+            print("🔇 TTS stopped and cancelled due to VoiceOver activation")
+        }
+    }
     
     // MARK: - Cancellable TTS Management
     private var pendingTTSWorkItems: [DispatchWorkItem] = []
@@ -119,6 +163,11 @@ class UnifiedCameraManager: NSObject, ObservableObject {
         super.init()
         setupHapticEngine()
         updateUIForMode()
+        setupVoiceOverObserver()
+    }
+    
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
     
     private func updateUIForMode() {
@@ -129,16 +178,17 @@ class UnifiedCameraManager: NSObject, ObservableObject {
             isCameraActive = false
             
             // Provide TTS feedback even in preview
-            if isVoiceGuidanceEnabled {
+            if isVoiceGuidanceEnabled && !isVoiceOverRunning {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                     self.speakGuidance("Mode pratinjau aktif. Bangun dan jalankan aplikasi di perangkat asli untuk menggunakan kamera dan fitur OCR.", priority: true)
                 }
             }
         } else {
-            statusMessage = "📷 CAMERA READY"
-            descriptionMessage = "OCR Processing Running\nPoint at expiration date"
-            accessibilityStatus = "Siap memindai"
+            statusMessage = "💊 SCANNING DRUG NAME"
+            descriptionMessage = "OCR Processing Running\nPoint at drug name first"
+            accessibilityStatus = "Siap memindai nama obat"
             isCameraActive = true
+            ocrPhase = .drugName // Ensure we start with drug name phase
         }
     }
     
@@ -192,7 +242,10 @@ class UnifiedCameraManager: NSObject, ObservableObject {
                 self.descriptionMessage = "Go to Settings > Expirad > Camera"
                 self.debugInfo = "Camera permission denied"
                 self.isCameraActive = false
-                self.speakGuidance("Izin kamera ditolak. Silakan buka Pengaturan, lalu Expirad, lalu Kamera, dan aktifkan akses kamera.", priority: true)
+                // Only speak if VoiceOver is not running
+                if !self.isVoiceOverRunning {
+                    self.speakGuidance("Izin kamera ditolak. Silakan buka Pengaturan, lalu Expirad, lalu Kamera, dan aktifkan akses kamera.", priority: true)
+                }
             }
         case .restricted:
             DispatchQueue.main.async {
@@ -327,11 +380,12 @@ class UnifiedCameraManager: NSObject, ObservableObject {
             // Give camera a moment to stabilize before declaring active
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 if session.isRunning {
-                    self.statusMessage = "📷 CAMERA ACTIVE"
-                    self.descriptionMessage = "OCR Processing Running\nPoint at expiration date"
+                    self.statusMessage = "💊 SCANNING DRUG NAME"
+                    self.descriptionMessage = "OCR Processing Running\nPoint at drug name first"
                     self.debugInfo = "Camera running, OCR active"
                     self.isCameraActive = true
-                    self.positioningGuidance = "Ready! Point camera at medicine package"
+                    self.positioningGuidance = "Ready! Point camera at drug name"
+                    self.ocrPhase = .drugName // Ensure we start with drug name phase
                     
                     // Start TTS guidance once camera is fully ready
                     if self.isVoiceGuidanceEnabled && !self.hasSpokenInitialInstructions {
@@ -341,7 +395,10 @@ class UnifiedCameraManager: NSObject, ObservableObject {
                     self.statusMessage = "❌ CAMERA FAILED"
                     self.descriptionMessage = "Camera failed to start"
                     self.debugInfo = "Session failed to start"
-                    self.speakGuidance("Kamera gagal dimulai. Silakan mulai ulang aplikasi.", priority: true)
+                    // Only speak if VoiceOver is not running
+                    if !self.isVoiceOverRunning {
+                        self.speakGuidance("Kamera gagal dimulai. Silakan mulai ulang aplikasi.", priority: true)
+                    }
                 }
             }
             
@@ -383,14 +440,20 @@ class UnifiedCameraManager: NSObject, ObservableObject {
                     self.isFlashlightOn = true
                 }
                 print("💡 Flashlight ON")
-                speakGuidance("Senter dinyalakan")
+                // Only speak if VoiceOver is not running
+                if !self.isVoiceOverRunning {
+                    speakGuidance("Senter dinyalakan")
+                }
             } else {
                 device.torchMode = .off
                 DispatchQueue.main.async {
                     self.isFlashlightOn = false
                 }
                 print("💡 Flashlight OFF")
-                speakGuidance("Senter dimatikan")
+                // Only speak if VoiceOver is not running
+                if !self.isVoiceOverRunning {
+                    speakGuidance("Senter dimatikan")
+                }
             }
             
             device.unlockForConfiguration()
@@ -401,21 +464,47 @@ class UnifiedCameraManager: NSObject, ObservableObject {
     
     // MARK: - Comprehensive Indonesian Voice Guidance for Blind Users
     private func speakInitialInstructions() {
+        // Don't provide TTS instructions if VoiceOver is running
+        guard !isVoiceOverRunning else {
+            print("🔇 VoiceOver is running - skipping initial instructions")
+            return
+        }
+        
         guard isVoiceGuidanceEnabled else { return }
         
         // Cancel any existing pending TTS first
         cancelAllPendingTTS()
         
-        // Schedule cancellable Indonesian guidance with timing
-        scheduleTTS(delay: 1.0, message: "Selamat datang. Arahkan kamera pada kemasan.")
-        scheduleTTS(delay: 4.0, message: "Tahan kamera stabil sekitar 20 sentimeter dari kemasan.")
-        scheduleTTS(delay: 7.5, message: "Coba arahkan kamera ke beberapa sisi kemasan. Ketuk dua kali untuk fokus.")
+        // Schedule cancellable Indonesian guidance with timing for drug name phase
+        if ocrPhase == .drugName {
+            scheduleTTS(delay: 1.0, message: "Selamat datang. Arahkan kamera ke nama obat pada kemasan.")
+            scheduleTTS(delay: 4.0, message: "Tahan kamera stabil sekitar 20 sentimeter dari kemasan.")
+            scheduleTTS(delay: 7.5, message: "Cari area yang menampilkan nama obat. Ketuk dua kali untuk fokus.")
+        } else {
+            // Expiration date phase
+            scheduleTTS(delay: 1.0, message: "Sekarang arahkan kamera ke tanggal kadaluarsa.")
+            scheduleTTS(delay: 4.0, message: "Cari tulisan EXP, kadaluarsa, atau tanggal pada kemasan.")
+            scheduleTTS(delay: 7.5, message: "Tahan kamera stabil sekitar 15 sentimeter dari area tanggal.")
+        }
         
         hasSpokenInitialInstructions = true
-        print("🔊 Scheduled 3 cancellable Indonesian TTS guidance messages")
+        print("🔊 Scheduled 3 cancellable Indonesian TTS guidance messages for \(ocrPhase == .drugName ? "drug name" : "expiration date") phase")
     }
     
     func speakGuidance(_ message: String, priority: Bool = false) {
+        // Don't speak if VoiceOver is running (let VoiceOver handle accessibility)
+        guard !isVoiceOverRunning else {
+            print("🔇 VoiceOver is running - skipping TTS: \(message)")
+            return
+        }
+        
+        // Don't speak if alert is active
+        guard !isAlertActive else {
+            print("🔇 Alert is active - skipping TTS: \(message)")
+            shouldResumeTTSAfterAlert = true
+            return
+        }
+        
         guard isVoiceGuidanceEnabled else { 
             print("🔇 Voice guidance disabled")
             return 
@@ -431,6 +520,12 @@ class UnifiedCameraManager: NSObject, ObservableObject {
         
         print("🔊 Speaking (Indonesian): \(message)")
         
+        // Final check - don't speak if VoiceOver is running (race condition protection)
+        guard !UIAccessibility.isVoiceOverRunning else {
+            print("🔇 VoiceOver detected during speech - cancelling")
+            return
+        }
+        
         // Stop any current speech before starting new one
         if speechSynthesizer.isSpeaking {
             speechSynthesizer.stopSpeaking(at: .word)
@@ -445,9 +540,21 @@ class UnifiedCameraManager: NSObject, ObservableObject {
         speechSynthesizer.speak(utterance)
     }
     
+    // --- Drug Name TTS ---
+    private var lastSpokenDrugName: String? = nil
+    func speakDrugNameIfNeeded(_ drugName: String) {
+        guard lastSpokenDrugName != drugName else { return }
+        lastSpokenDrugName = drugName
+        stopSpeaking()
+        let utterance = AVSpeechUtterance(string: "Obat terdeteksi: \(drugName)")
+        utterance.voice = AVSpeechSynthesisVoice(language: "id-ID") ?? AVSpeechSynthesisVoice(language: "en-US")
+        utterance.rate = 0.5
+        utterance.volume = 1.0
+        speechSynthesizer.speak(utterance)
+    }
+    
     func stopSpeaking() {
         speechSynthesizer.stopSpeaking(at: .immediate)
-        cancelAllPendingTTS()
     }
     
     // MARK: - Cancellable TTS Management
@@ -464,6 +571,12 @@ class UnifiedCameraManager: NSObject, ObservableObject {
     }
     
     private func scheduleTTS(delay: Double, message: String, priority: Bool = true) {
+        // Don't schedule TTS if VoiceOver is running
+        guard !isVoiceOverRunning else {
+            print("🔇 VoiceOver is running - skipping scheduled TTS: \(message)")
+            return
+        }
+        
         let workItem = DispatchWorkItem { [weak self] in
             self?.speakGuidance(message, priority: priority)
         }
@@ -474,20 +587,36 @@ class UnifiedCameraManager: NSObject, ObservableObject {
     
     // MARK: - Additional Indonesian Help Functions
     func speakDetailedHelp() {
+        // Don't provide detailed help if VoiceOver is running
+        guard !isVoiceOverRunning else {
+            print("🔇 VoiceOver is running - skipping detailed help")
+            return
+        }
+        
         guard isVoiceGuidanceEnabled else { return }
         
         // Completely stop any current speech and cancel pending TTS
         stopSpeaking()
         
-        // Schedule cancellable detailed help guidance
-        scheduleTTS(delay: 0.5, message: "Panduan lengkap Expirade:")
-        scheduleTTS(delay: 3.0, message: "Pertama, pastikan kemasan obat dalam pencahayaan yang cukup.")
-        scheduleTTS(delay: 6.0, message: "Kedua, cari tulisan EXP, kadaluarsa, atau tanggal pada kemasan.")
-        scheduleTTS(delay: 9.0, message: "Ketiga, arahkan kamera tepat ke area tanggal tersebut.")
-        scheduleTTS(delay: 12.0, message: "Tahan kamera stabil sekitar 15 sentimeter dari kemasan.")
-        scheduleTTS(delay: 15.0, message: "Aplikasi akan memberikan getaran dan suara ketika tanggal terdeteksi.")
+        if ocrPhase == .drugName {
+            // Drug name phase guidance
+            scheduleTTS(delay: 0.5, message: "Panduan lengkap Expirade - Fase Nama Obat:")
+            scheduleTTS(delay: 3.0, message: "Pertama, pastikan kemasan obat dalam pencahayaan yang cukup.")
+            scheduleTTS(delay: 6.0, message: "Kedua, cari area yang menampilkan nama obat pada kemasan.")
+            scheduleTTS(delay: 9.0, message: "Ketiga, arahkan kamera tepat ke area nama obat tersebut.")
+            scheduleTTS(delay: 12.0, message: "Tahan kamera stabil sekitar 15 sentimeter dari kemasan.")
+            scheduleTTS(delay: 15.0, message: "Aplikasi akan menampilkan popup konfirmasi ketika nama obat terdeteksi.")
+        } else {
+            // Expiration date phase guidance
+            scheduleTTS(delay: 0.5, message: "Panduan lengkap Expirade - Fase Tanggal Kadaluarsa:")
+            scheduleTTS(delay: 3.0, message: "Pertama, pastikan kemasan obat dalam pencahayaan yang cukup.")
+            scheduleTTS(delay: 6.0, message: "Kedua, cari tulisan EXP, kadaluarsa, atau tanggal pada kemasan.")
+            scheduleTTS(delay: 9.0, message: "Ketiga, arahkan kamera tepat ke area tanggal tersebut.")
+            scheduleTTS(delay: 12.0, message: "Tahan kamera stabil sekitar 15 sentimeter dari kemasan.")
+            scheduleTTS(delay: 15.0, message: "Aplikasi akan memberikan getaran dan suara ketika tanggal terdeteksi.")
+        }
         
-        print("🔊 Scheduled 6 cancellable detailed help messages")
+        print("🔊 Scheduled 6 cancellable detailed help messages for \(ocrPhase == .drugName ? "drug name" : "expiration date") phase")
     }
     
     // MARK: - Comprehensive Real-World Expiration Date Parser
@@ -867,33 +996,6 @@ class UnifiedCameraManager: NSObject, ObservableObject {
         return nil
     }
     
-    private func parseYYYYMMPattern(_ text: String) -> Date? {
-        let pattern = #"(\d{4})\.(\d{1,2})"#
-        if let match = text.range(of: pattern, options: .regularExpression) {
-            let components = String(text[match]).components(separatedBy: ".")
-            if components.count == 2,
-               let year = Int(components[0]),
-               let month = Int(components[1]) {
-                return createFastDate(day: 1, month: month, year: year)
-            }
-        }
-        return nil
-    }
-    
-    private func parseMMYYYYPattern(_ text: String) -> Date? {
-        let pattern = #"(\d{1,2})\s+(\d{4})"#
-        if let match = text.range(of: pattern, options: .regularExpression) {
-            let components = String(text[match]).components(separatedBy: .whitespaces).filter { !$0.isEmpty }
-            if components.count == 2,
-               let month = Int(components[0]),
-               let year = Int(components[1]),
-               month >= 1 && month <= 12 {
-                return createFastDate(day: 1, month: month, year: year)
-            }
-        }
-        return nil
-    }
-    
     private func createFastDate(day: Int, month: Int, year: Int) -> Date? {
         guard day >= 1 && day <= 31 && 
               month >= 1 && month <= 12 && 
@@ -916,6 +1018,56 @@ class UnifiedCameraManager: NSObject, ObservableObject {
         }
         return year
     }
+    
+    // MARK: - Drug Name Confirmation Handler
+    func userConfirmedDrugName(_ confirmed: Bool) {
+        if confirmed {
+            // User confirmed the drug name, move to expiration date phase
+            ocrPhase = .expirationDate
+            detectedDrugName = detectedDrugName // Keep the detected name
+            
+            DispatchQueue.main.async {
+                self.statusMessage = "📅 SCANNING EXPIRATION"
+                self.descriptionMessage = "Drug confirmed: \(self.detectedDrugName ?? "")\nNow scanning for expiration date"
+                self.accessibilityStatus = "Nama obat dikonfirmasi. Sekarang memindai tanggal kadaluarsa"
+                self.ocrStatus = "Looking for expiration date..."
+                self.positioningGuidance = "Point camera at expiration date area"
+            }
+            
+            // Resume OCR processing for expiration date detection
+            resumeCameraAndOCR()
+            
+            // Provide guidance for expiration date scanning (VoiceOver-aware)
+            if !isVoiceOverRunning {
+                speakGuidance("Nama obat dikonfirmasi. Sekarang arahkan kamera ke area tanggal kadaluarsa", priority: true)
+            }
+            
+        } else {
+            // User rejected the drug name, continue scanning for drug names
+            detectedDrugName = nil
+        }
+    }
+    
+    // MARK: - OCR Text Handler (FIX: implement this method)
+    private func handleDetectedText(request: VNRequest, error: Error?) {
+        guard let results = request.results as? [VNRecognizedTextObservation], error == nil else {
+            print("❌ OCR error: \(error?.localizedDescription ?? "Unknown error")")
+            return
+        }
+        let detectedText = results.compactMap { $0.topCandidates(1).first?.string }
+        // You may want to process detectedText here, e.g.:
+        // - If ocrPhase == .drugName, try to detect drug name
+        // - If ocrPhase == .expirationDate, try to detect expiration date
+        // For now, just print:
+        print("🔍 OCR Detected Text: \(detectedText)")
+        // TODO: Call your drug name or expiration date detection logic here
+    }
+
+    // MARK: - Resume OCR Processing (FIX: implement this method)
+    private func resumeCameraAndOCR() {
+        isOCRProcessingEnabled = true
+        print("✅ OCR processing resumed for next phase")
+    }
 }
 
 // MARK: - AVCaptureVideoDataOutputSampleBufferDelegate
@@ -926,173 +1078,31 @@ extension UnifiedCameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         // Skip OCR processing if disabled (e.g., during navigation to ResultView)
         guard isOCRProcessingEnabled else { return }
         
-        // Increase OCR processing frequency for faster detection
+        // Increase OCR processing frame
         ocrFrameCount += 1
-        guard ocrFrameCount % 5 == 0 else { return } // Process every 5th frame instead of 10th
         
-        // Convert sample buffer to CVPixelBuffer
-        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
-            return
+        // Process only at specified intervals for performance
+        guard ocrFrameCount % requiredConfidenceFrames == 0 else { return }
+        
+        // Perform OCR using Vision framework
+        if let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
+            // Send frame for OCR processing
+            performOCR(on: pixelBuffer)
         }
-        
-        // Perform text recognition on the frame
-        performTextRecognition(on: pixelBuffer)
     }
     
-    private func performTextRecognition(on pixelBuffer: CVPixelBuffer) {
-        let imageRequestHandler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, options: [:])
+    // MARK: - OCR Processing
+    private func performOCR(on pixelBuffer: CVPixelBuffer) {
+        guard isOCRProcessingEnabled else { return }
         
+        // Create a new request for each frame to avoid stale results
+        let request = textRequest
+        
+        // Perform the request
         do {
-            try imageRequestHandler.perform([textRequest])
+            try VNImageRequestHandler(cvPixelBuffer: pixelBuffer, options: [:]).perform([request])
         } catch {
-            print("❌ Error performing text recognition: \(error.localizedDescription)")
+            print("❌ OCR request error: \(error.localizedDescription)")
         }
     }
-    
-    private func handleDetectedText(request: VNRequest, error: Error?) {
-        if let error = error {
-            print("❌ Text recognition error: \(error.localizedDescription)")
-            return
-        }
-        
-        guard let observations = request.results as? [VNRecognizedTextObservation] else {
-            return
-        }
-        
-        // Extract all detected text
-        let detectedText = observations.compactMap { observation in
-            return observation.topCandidates(1).first?.string
-        }
-        
-        // Only process if we have detected text
-        guard !detectedText.isEmpty else {
-            DispatchQueue.main.async {
-                self.ocrStatus = "Looking for text..."
-                self.positioningGuidance = "Move camera closer to text"
-                self.accessibilityStatus = "Tidak ada teks terdeteksi. Gerakkan lebih dekat."
-            }
-            return
-        }
-        
-        // Quick pre-filter: only process if text contains numbers
-        let hasNumbers = detectedText.contains { text in
-            text.rangeOfCharacter(from: .decimalDigits) != nil
-        }
-        
-        guard hasNumbers else {
-            DispatchQueue.main.async {
-                self.ocrStatus = "Looking for dates..."
-                self.positioningGuidance = "Move to find numbers or dates"
-                self.accessibilityStatus = "Teks ditemukan. Mencari tanggal kadaluarsa."
-                
-                // Provide occasional guidance when no numbers found
-                if self.ocrFrameCount % 50 == 0 {  // Every ~10 seconds
-                    self.speakGuidance("Arahkan ke area tanggal kadaluarsa.", priority: false)
-                    self.accessibilityStatus = "Tanggal tidak ditemukan. Coba sudut berbeda."
-                }
-            }
-            return
-        }
-        
-        // Update OCR status
-        DispatchQueue.main.async {
-            self.ocrStatus = "Found \(detectedText.count) text elements"
-            self.positioningGuidance = "Scanning for expiration dates..."
-            self.accessibilityStatus = "Memindai teks untuk tanggal kadaluarsa..."
-        }
-        
-        // Try to parse expiration date using inline fast parser
-        if let parsedDate = parseExpirationDateFast(from: detectedText) {
-            handleSuccessfulDateDetection(parsedDate, from: detectedText)
-        } else {
-            // Provide positioning guidance based on detected text
-            providePositioningGuidance(detectedText)
-        }
-        
-        lastDetectedText = detectedText
-    }
-    
-    private func handleSuccessfulDateDetection(_ date: Date, from texts: [String]) {
-        // CRITICAL: Prevent multiple simultaneous detections
-        guard !isDetectionInProgress else {
-            print("🔒 Detection already in progress, skipping duplicate")
-            return
-        }
-        
-        // Fast detection - check if it's the same date to avoid duplicates
-        if let lastDate = lastDetectedDate, 
-           Calendar.current.isDate(date, inSameDayAs: lastDate) {
-            detectionConfidenceCount += 1
-        } else {
-            // New date detected, reset counter
-            detectionConfidenceCount = 1
-            lastDetectedDate = date
-        }
-        
-        DispatchQueue.main.async {
-            self.ocrStatus = "Date found! Confidence: \(self.detectionConfidenceCount)/\(self.requiredConfidenceFrames)"
-        }
-        
-        // Immediate detection with just 1 confirmation for speed
-        if detectionConfidenceCount >= requiredConfidenceFrames {
-            // IMMEDIATELY lock further detections
-            isDetectionInProgress = true
-            
-            DispatchQueue.main.async {
-                self.detectedDate = date
-                self.statusMessage = "✅ DATE DETECTED"
-                self.descriptionMessage = "Expiration date found!"
-                self.positioningGuidance = "Date successfully detected!"
-                self.accessibilityStatus = "Tanggal kadaluarsa terdeteksi!"
-                self.shouldNavigateToResult = true
-            }
-            
-            // Trigger haptic feedback for successful detection (ONCE)
-            triggerSuccessHaptic()
-            
-            // CRITICAL: Stop any current TTS to prevent conflict with ResultView
-            stopSpeaking()
-            
-            // Announce the found date with shorter message to prevent overlap
-            speakGuidance("Tanggal terdeteksi", priority: true)
-            
-            print("✅ Date detected instantly: \(date) - Detection locked")
-            
-            // Disable OCR processing temporarily instead of stopping session
-            self.isOCRProcessingEnabled = false
-            
-            // Stop TTS after a brief moment to ensure clean handoff to ResultView
-            DispatchQueue.main.asyncAfter(deadline: .now() + CAMERA_TTS_CLEANUP_DELAY) {
-                self.stopSpeaking()
-            }
-        }
-    }
-    
-    private func providePositioningGuidance(_ detectedText: [String]) {
-        // Reset confidence count if we lost the date
-        detectionConfidenceCount = 0
-        
-        // Analyze detected text to provide guidance
-        let allText = detectedText.joined(separator: " ").uppercased()
-        
-        DispatchQueue.main.async {
-            if allText.contains("EXP") || allText.contains("EXPIRE") || allText.contains("BEST") || allText.contains("USE BY") {
-                self.positioningGuidance = "Expiration area found! Hold steady..."
-                self.speakGuidance("Mencari area kadaluarsa, tahan stabil.", priority: false)
-            } else if allText.contains(where: { $0.isNumber }) {
-                // Has numbers but no keywords
-                self.positioningGuidance = "Found numbers, looking for dates..."
-                self.speakGuidance("Memindai angka untuk tanggal.", priority: false)
-            } else if allText.count > 100 {
-                self.positioningGuidance = "Too much text. Focus on expiration area"
-                self.speakGuidance("Pindah ke area kadaluarsa.", priority: false)
-            } else if allText.count < 10 {
-                self.positioningGuidance = "Move closer to see more text"
-                self.speakGuidance("Gerakkan lebih dekat.", priority: false)
-            } else {
-                self.positioningGuidance = "Scanning for expiration dates..."
-                // Don't speak this one to avoid too much chatter
-            }
-        }
-    }
-} 
+}
