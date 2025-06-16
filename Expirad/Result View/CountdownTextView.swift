@@ -17,6 +17,8 @@ struct CountdownTextView: View {
         VStack(spacing: 4) {
             Text("\(absoluteDays)")
                 .font(.system(size: 80, weight: .bold))
+                .minimumScaleFactor(0.5)
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .center)
                 .accessibilityLabel(
                     isOverdue 
                     ? "Terlewat \(angkaKeTeks(absoluteDays)) hari"
@@ -27,6 +29,7 @@ struct CountdownTextView: View {
                 .font(.title3)
                 .accessibilityHidden(true)
         }
+        .frame(maxWidth: .infinity)
     }
 }
 

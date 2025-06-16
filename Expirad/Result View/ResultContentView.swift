@@ -43,29 +43,10 @@ struct ResultContentView: View {
                 .foregroundColor(.black)
                 .padding(.top, 24)
         }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 20)
     }
     
-    // MARK: - Helper Functions
-    private func calculateDaysLeft(from date: Date) -> Int {
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
-        let expirationDate = calendar.startOfDay(for: date)
-        
-        let components = calendar.dateComponents([.day], from: today, to: expirationDate)
-        return components.day ?? 0
-    }
-    
-    private func getExpiredStatus(for daysLeft: Int) -> ExpiredStatus {
-        if daysLeft < 0 {
-            return .expired
-        } else if daysLeft <= 4 {
-            return .danger
-        } else if daysLeft <= 14 {
-            return .soon
-        } else {
-            return .safe
-        }
-    }
 }
 
 #Preview {

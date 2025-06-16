@@ -19,9 +19,12 @@ struct DrugNameView: View {
             Text(drugName)
                 .font(.title2)
                 .bold()
-                .multilineTextAlignment(.center)
+                .lineLimit(nil)
+                .minimumScaleFactor(0.5)
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .center)
                 .accessibilityLabel("Nama obat: \(drugName)")
         }
+        .frame(maxWidth: .infinity)
     }
 }
 

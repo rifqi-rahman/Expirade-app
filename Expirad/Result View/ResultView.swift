@@ -26,16 +26,6 @@ struct ResultView: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            // Top Navigation
-            HStack {
-                BackButtonView {
-                    dismiss()
-                }
-                Spacer()
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 20)
-            
             Spacer()
             
             // Main Content
@@ -44,16 +34,19 @@ struct ResultView: View {
                     detectedDate: date,
                     detectedDrugName: detectedDrugName
                 )
+                .padding(.bottom, 20)
             } else {
                 NoDataView()
+                    .padding(.bottom, 20)
             }
             
             Spacer()
         }
+        .frame(maxWidth: .infinity)
         .background(Color.white)
         .navigationTitle("Hasil Pemindaian")
         .navigationBarTitleDisplayMode(.inline)
-        .navigationBarBackButtonHidden(true)
+        .navigationBarBackButtonHidden(false)
         .onAppear {
             // CENTRALIZED TTS: Handle both cases in one place to prevent double TTS
             guard !hasSpoken else { return }

@@ -36,6 +36,8 @@ struct NoDataView: View {
                 .accessibilityLabel("Tanggal kadaluarsa tidak dapat dibaca dari gambar. Silakan coba lagi dengan pencahayaan yang lebih baik.")
                 .accessibilityHint("Petunjuk untuk mencoba pemindaian ulang")
         }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 20)
     }
 }
 
